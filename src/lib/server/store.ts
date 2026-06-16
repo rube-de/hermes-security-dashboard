@@ -98,6 +98,22 @@ function cadenceHours(): number {
 }
 
 /* ------------------------------------------------------------------ */
+/* re-run requests (user asks; the agent picks them up next cycle)     */
+/* ------------------------------------------------------------------ */
+
+/** Record a user request to re-review `repoId` on the next Hermes cycle. */
+export function requestRerun(repoId: string, at = Date.now()): number {
+	setMeta(`rerun_req:${repoId}`, String(at));
+	return at;
+}
+
+/** Pending re-run request timestamp for `repoId`, or null if none. */
+export function getRerunRequest(repoId: string): number | null {
+	const v = getMeta(`rerun_req:${repoId}`, '');
+	return v ? Number(v) : null;
+}
+
+/* ------------------------------------------------------------------ */
 /* repos                                                               */
 /* ------------------------------------------------------------------ */
 

@@ -17,6 +17,21 @@
 			? scan.elapsedLabel
 			: '0:00'
 	);
+
+	// ----- re-run request -----
+	// The agent runs scans on a schedule; this records a user request for the next
+	// cycle (the agent reads pending requests via GET /api/repos/:id/rerun).
+	let rerun = $state<'idle' | 'pending' | 'queued' | 'error'>('idle');
+	async function requestRerun() {
+		if (rerun === 'pending' || rerun === 'queued') return;
+		rerun = 'pending';
+		try {
+			const res = await fetch(`/api/repos/${repo.id}/rerun`, { method: 'POST' });
+			rerun = res.ok ? 'queued' : 'error';
+		} catch {
+			rerun = 'error';
+		}
+	}
 </script>
 
 <svelte:head><title>Hermes · {repo.id}</title></svelte:head>
@@ -36,8 +51,22 @@
 				<div class="desc">{repo.description}</div>
 			</div>
 		</div>
-		<button class="rerun mono" title="Queues this repo for the next Hermes cycle">
-			<span>↻</span> Re-run review
+		<button
+			class="rerun mono"
+			onclick={requestRerun}
+			disabled={rerun === 'pending' || rerun === 'queued'}
+			aria-live="polite"
+			title="Request a re-run on the next Hermes cycle"
+		>
+			{#if rerun === 'queued'}
+				<span>✓</span> Re-run requested
+			{:else if rerun === 'pending'}
+				<span>↻</span> Requesting…
+			{:else if rerun === 'error'}
+				<span>⚠</span> Try again
+			{:else}
+				<span>↻</span> Re-run review
+			{/if}
 		</button>
 	</div>
 
@@ -194,6 +223,10 @@
 		font-weight: 600;
 		cursor: pointer;
 		white-space: nowrap;
+	}
+	.rerun:disabled {
+		cursor: default;
+		opacity: 0.7;
 	}
 
 	.scan-banner {
