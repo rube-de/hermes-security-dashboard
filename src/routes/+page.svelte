@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { scan } from '$lib/scan.svelte';
-	import { fmtElapsed, fmtInt, statusColor, SEV_VAR } from '$lib/format';
+	import { fmtInt, statusColor, SEV_VAR } from '$lib/format';
 	import SeverityPills from '$lib/components/SeverityPills.svelte';
 	import type { Severity } from '$lib/types';
 	import type { PageData } from './$types';
@@ -9,14 +9,15 @@
 	const o = $derived(data.overview);
 	const totals = $derived(o.totals);
 
-	// ----- live active run (server data for SSR, store for live updates) -----
-	const live = $derived(scan.state.active ? scan.state : data.scan);
-	const elapsedLabel = $derived.by(() => {
-		if (scan.state.active) return scan.elapsedLabel;
-		if (data.scan.active && data.scan.startedAt)
-			return fmtElapsed((Date.now() - data.scan.startedAt) / 1000);
-		return '0:00';
-	});
+	// ----- live active run -----
+	// SSR / first paint render the server snapshot; once the store hydrates it is
+	// the single source of truth, so a run that ends while the page is open clears
+	// instead of lingering as stale `data.scan`. (Header pill already keys off the
+	// store directly — this keeps the overview card consistent with it.)
+	const live = $derived(scan.hydrated ? scan.state : data.scan);
+	const elapsedLabel = $derived(
+		scan.hydrated && scan.state.active ? scan.elapsedLabel : '0:00'
+	);
 
 	// ----- severity bar segments -----
 	function pct(n: number) {

@@ -159,6 +159,14 @@ function latestReviewRow(repoId: string): ReviewRow | undefined {
 		.get(repoId) as ReviewRow | undefined;
 }
 
+/** Existing review id for a (repo, commit) pair, or null. Drives idempotent submits. */
+export function findReviewByCommit(repoId: string, commit: string): string | null {
+	const row = db
+		.prepare('SELECT id FROM reviews WHERE repo_id = ? AND commit_hash = ? LIMIT 1')
+		.get(repoId, commit) as { id: string } | undefined;
+	return row?.id ?? null;
+}
+
 /* ------------------------------------------------------------------ */
 /* summaries                                                           */
 /* ------------------------------------------------------------------ */
@@ -511,7 +519,16 @@ function startOfLocalDay(ts: number): number {
 	return d.getTime();
 }
 
-const DAY_MS = 86_400_000;
+/**
+ * `n` local days from `ts` via calendar arithmetic (not fixed-ms). Starting at a
+ * local midnight, the result is the local midnight `n` days away — correct across
+ * DST transitions, where a "day" is 23 or 25 hours, not always 86_400_000 ms.
+ */
+function addLocalDays(ts: number, n: number): number {
+	const d = new Date(ts);
+	d.setDate(d.getDate() + n);
+	return d.getTime();
+}
 
 /**
  * Daily new/resolved/review counts over the last `days` days (continuous,
@@ -521,7 +538,7 @@ const DAY_MS = 86_400_000;
 export function getTrends(days = 14, opts: { repoId?: string } = {}, now = Date.now()): TrendBucket[] {
 	const span = Math.max(1, Math.min(365, Math.floor(days)));
 	const today0 = startOfLocalDay(now);
-	const since = today0 - (span - 1) * DAY_MS;
+	const since = addLocalDays(today0, -(span - 1));
 
 	const where = ['created_at >= ?'];
 	const params: (string | number)[] = [since];
@@ -549,7 +566,7 @@ export function getTrends(days = 14, opts: { repoId?: string } = {}, now = Date.
 
 	const out: TrendBucket[] = [];
 	for (let i = span - 1; i >= 0; i--) {
-		const dayStart = today0 - i * DAY_MS;
+		const dayStart = addLocalDays(today0, -i);
 		const d = new Date(dayStart);
 		const a = agg.get(dayStart) ?? { n: 0, r: 0, reviews: 0 };
 		out.push({

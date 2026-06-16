@@ -1,22 +1,22 @@
 <script lang="ts">
 	import { scan } from '$lib/scan.svelte';
-	import { fmtElapsed } from '$lib/format';
 	import SeverityPills from '$lib/components/SeverityPills.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 	const repo = $derived(data.repo);
 
+	// SSR uses the server snapshot; the live store is authoritative once hydrated,
+	// so a run that ends while this page is open clears the banner immediately.
 	const scanning = $derived(
-		scan.state.active ? scan.state.repoId === repo.id : repo.scanning
+		scan.hydrated ? scan.state.active && scan.state.repoId === repo.id : repo.scanning
 	);
-	const live = $derived(scan.state.active ? scan.state : data.scan);
-	const elapsedLabel = $derived.by(() => {
-		if (scan.state.active && scan.state.repoId === repo.id) return scan.elapsedLabel;
-		if (data.scan.active && data.scan.startedAt)
-			return fmtElapsed((Date.now() - data.scan.startedAt) / 1000);
-		return '0:00';
-	});
+	const live = $derived(scan.hydrated ? scan.state : data.scan);
+	const elapsedLabel = $derived(
+		scan.hydrated && scan.state.active && scan.state.repoId === repo.id
+			? scan.elapsedLabel
+			: '0:00'
+	);
 </script>
 
 <svelte:head><title>Hermes · {repo.id}</title></svelte:head>

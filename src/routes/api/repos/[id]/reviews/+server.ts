@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { getRepoDetail, insertReview, type FindingInput } from '$lib/server/store';
+import { getRepoDetail, insertReview, findReviewByCommit, type FindingInput } from '$lib/server/store';
 import { checkWriteAuth } from '$lib/server/auth';
 import type { Severity } from '$lib/types';
 import type { RequestHandler } from './$types';
@@ -39,6 +39,17 @@ export const POST: RequestHandler = async ({ params, request }) => {
 
 	const commit = typeof body.commit === 'string' ? body.commit.trim() : '';
 	if (!commit) return json({ error: '`commit` (string) is required' }, { status: 400 });
+
+	// Idempotent on (repo, commit): a commit's code is immutable, so a re-submit is
+	// a retry (at-least-once delivery), not a new run. Return the existing review
+	// instead of inserting a duplicate zero-delta row that would pollute counts/trends.
+	const existing = findReviewByCommit(params.id, commit);
+	if (existing) {
+		return json(
+			{ ok: true, reviewId: existing, repoId: params.id, duplicate: true },
+			{ status: 200 }
+		);
+	}
 
 	const rawFindings = Array.isArray(body.findings) ? body.findings : [];
 	const findings: FindingInput[] = [];

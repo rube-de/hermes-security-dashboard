@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS reviews (
   created_at     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_reviews_repo ON reviews(repo_id, created_at DESC);
+-- One review per (repo, commit): a commit's code is immutable, so re-submitting
+-- the same commit is a retry, not a new run. Backstops the idempotent POST guard.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_repo_commit ON reviews(repo_id, commit_hash);
 
 CREATE TABLE IF NOT EXISTS findings (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,

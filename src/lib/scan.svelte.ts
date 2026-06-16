@@ -20,6 +20,14 @@ const EMPTY: ScanState = {
 class ScanStore {
 	state = $state<ScanState>(EMPTY);
 	elapsed = $state(0); // seconds since started_at
+	/**
+	 * True once the client store has taken over from the SSR snapshot. Pages use
+	 * this to decide their source of truth: before hydration they render the
+	 * server's `data.scan` (correct first paint, no Date.now() in SSR markup);
+	 * after it, `scan.state` is authoritative — so a run that ends while the page
+	 * is open clears everywhere instead of lingering as stale SSR data.
+	 */
+	hydrated = $state(false);
 	private pollTimer: ReturnType<typeof setInterval> | null = null;
 	private tickTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -31,6 +39,7 @@ class ScanStore {
 	start(initial: ScanState) {
 		this.hydrate(initial);
 		if (!browser) return;
+		this.hydrated = true;
 		this.tickTimer = setInterval(() => this.recompute(), 1000);
 		this.pollTimer = setInterval(() => this.poll(), 3000);
 	}
