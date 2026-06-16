@@ -1,0 +1,158 @@
+/* ============================================================
+   Hermes Security Dashboard — design tokens & base styles
+   Tokens mirror the Claude Design prototype (Oasis-inspired:
+   deep dark theme + teal accent, with a restrained light theme).
+   Theme is switched via [data-theme] on <html>.
+   ============================================================ */
+
+:root[data-theme='dark'] {
+	--bg: #0a0d12;
+	--bg2: #0c1117;
+	--surface: #11161e;
+	--surface2: #161d27;
+	--hover: #1b2430;
+	--border: rgba(255, 255, 255, 0.07);
+	--border2: rgba(255, 255, 255, 0.13);
+	--grid: rgba(255, 255, 255, 0.05);
+	--text: #e9eef3;
+	--dim: #9ba7b4;
+	--faint: #5c6775;
+	--crit: #ff5d73;
+	--critB: rgba(255, 93, 115, 0.14);
+	--high: #ff9d45;
+	--highB: rgba(255, 157, 69, 0.14);
+	--med: #ffcf3d;
+	--medB: rgba(255, 207, 61, 0.13);
+	--low: #74a9ff;
+	--lowB: rgba(116, 169, 255, 0.14);
+	--accent: #54e0be;
+	--accentB: rgba(84, 224, 190, 0.13);
+	--accent2: #7aa8ff;
+	--shadow: rgba(0, 0, 0, 0.18);
+}
+
+:root[data-theme='light'] {
+	--bg: #edf0f3;
+	--bg2: #ffffff;
+	--surface: #ffffff;
+	--surface2: #f5f7f9;
+	--hover: #eef2f6;
+	--border: rgba(12, 22, 33, 0.1);
+	--border2: rgba(12, 22, 33, 0.17);
+	--grid: rgba(12, 22, 33, 0.05);
+	--text: #0e1620;
+	--dim: #586573;
+	--faint: #8995a2;
+	--crit: #d92d4e;
+	--critB: rgba(217, 45, 78, 0.09);
+	--high: #c0680a;
+	--highB: rgba(192, 104, 10, 0.1);
+	--med: #937000;
+	--medB: rgba(147, 112, 0, 0.11);
+	--low: #2e63d6;
+	--lowB: rgba(46, 99, 214, 0.09);
+	--accent: #0b8e76;
+	--accentB: rgba(11, 142, 118, 0.1);
+	--accent2: #2e63d6;
+	--shadow: rgba(12, 22, 33, 0.12);
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+}
+
+body {
+	min-height: 100vh;
+	background: var(--bg);
+	color: var(--text);
+	font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+	padding-bottom: 72px;
+	transition:
+		background 0.25s ease,
+		color 0.25s ease;
+}
+
+a {
+	color: inherit;
+	text-decoration: none;
+}
+
+button {
+	font-family: inherit;
+}
+
+input {
+	font-family: inherit;
+}
+
+::selection {
+	background: var(--accentB);
+}
+
+::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+::-webkit-scrollbar-thumb {
+	background: var(--border2);
+	border-radius: 6px;
+}
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+/* ---- shared type helpers ---- */
+.display {
+	font-family: 'Space Grotesk', sans-serif;
+}
+.mono {
+	font-family: 'IBM Plex Mono', monospace;
+}
+
+/* ---- animations ---- */
+@keyframes hpulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.3;
+	}
+}
+@keyframes hblink {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0;
+	}
+}
+@keyframes hrise {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	* {
+		animation-duration: 0.001ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.001ms !important;
+	}
+}
