@@ -1,4 +1,5 @@
 import { browser } from '$app/environment';
+import { base } from '$app/paths';
 import { fmtElapsed } from './format';
 import type { ScanState } from './types';
 
@@ -57,7 +58,7 @@ class ScanStore {
 
 	private async poll() {
 		try {
-			const res = await fetch('/api/scan', { headers: { accept: 'application/json' } });
+			const res = await fetch(`${base}/api/scan`, { headers: { accept: 'application/json' } });
 			if (!res.ok) return;
 			this.state = (await res.json()) as ScanState;
 			this.recompute();

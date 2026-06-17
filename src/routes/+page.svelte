@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { scan } from '$lib/scan.svelte';
 	import { fmtInt, statusColor, SEV_VAR } from '$lib/format';
 	import SeverityPills from '$lib/components/SeverityPills.svelte';
@@ -161,7 +162,7 @@
 					<span class="mono">Active run · {elapsedLabel}</span>
 				</div>
 				{#if live.active && live.repoId}
-					<a class="run-repo display" href="/repo/{live.repoId}">{live.repoId}</a>
+					<a class="run-repo display" href="{base}/repo/{live.repoId}">{live.repoId}</a>
 					<div class="run-file mono">scanning {live.currentFile ?? '…'}</div>
 					<div class="pbar"><div class="pfill" style="width:{live.progress}%"></div></div>
 				{:else}
@@ -255,7 +256,7 @@
 			</div>
 		{:else}
 			{#each filtered as r (r.id)}
-				<a class="trow" href="/repo/{r.id}">
+				<a class="trow" href="{base}/repo/{r.id}">
 					<div class="cell-repo">
 						<span class="lang-dot" style="background:{r.langColor}"></span>
 						<div class="repo-text">

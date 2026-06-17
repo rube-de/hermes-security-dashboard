@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { base } from '$app/paths';
 	import { theme } from '$lib/theme.svelte';
 	import { scan } from '$lib/scan.svelte';
 	import Logo from './Logo.svelte';
 
-	const path = $derived(page.url.pathname);
+	// Strip the base prefix so the route regexes below match regardless of the
+	// deploy path (page.url.pathname includes base, e.g. /security/repo/x).
+	const path = $derived(page.url.pathname.slice(base.length));
 	const repoId = $derived(page.params.id ?? null);
 	const isReview = $derived(/^\/repo\/[^/]+\/review\//.test(path));
 	const isRepo = $derived(/^\/repo\/[^/]+\/?$/.test(path));
@@ -12,7 +15,7 @@
 </script>
 
 <header>
-	<a class="brand" href="/">
+	<a class="brand" href="{base}/">
 		<Logo size={30} />
 		<div class="brand-text">
 			<div class="brand-name display">HERMES</div>
@@ -22,14 +25,14 @@
 
 	<nav class="crumbs mono">
 		<span class="sep">/</span>
-		<a href="/" class="crumb-link">overview</a>
+		<a href="{base}/" class="crumb-link">overview</a>
 		{#if isRepo && repoId}
 			<span class="sep">/</span>
 			<span class="crumb-cur">{repoId}</span>
 		{/if}
 		{#if isReview && repoId}
 			<span class="sep">/</span>
-			<a href="/repo/{repoId}" class="crumb-link">{repoId}</a>
+			<a href="{base}/repo/{repoId}" class="crumb-link">{repoId}</a>
 			<span class="sep">/</span>
 			<span class="crumb-cur">{commit ?? 'report'}</span>
 		{/if}
@@ -38,7 +41,7 @@
 	<div class="spacer"></div>
 
 	{#if scan.state.active}
-		<a class="scan-pill mono" href={scan.state.repoId ? `/repo/${scan.state.repoId}` : '/'}>
+		<a class="scan-pill mono" href={scan.state.repoId ? `${base}/repo/${scan.state.repoId}` : `${base}/`}>
 			<span class="scan-dot"></span>
 			<span>SCAN ACTIVE · {scan.elapsedLabel}</span>
 		</a>

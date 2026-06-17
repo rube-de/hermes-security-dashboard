@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { scan } from '$lib/scan.svelte';
 	import SeverityPills from '$lib/components/SeverityPills.svelte';
 	import type { PageData } from './$types';
@@ -26,7 +27,7 @@
 		if (rerun === 'pending' || rerun === 'queued') return;
 		rerun = 'pending';
 		try {
-			const res = await fetch(`/api/repos/${repo.id}/rerun`, { method: 'POST' });
+			const res = await fetch(`${base}/api/repos/${repo.id}/rerun`, { method: 'POST' });
 			rerun = res.ok ? 'queued' : 'error';
 		} catch {
 			rerun = 'error';
@@ -37,7 +38,7 @@
 <svelte:head><title>Hermes · {repo.id}</title></svelte:head>
 
 <main>
-	<a class="back mono" href="/">← All repositories</a>
+	<a class="back mono" href="{base}/">← All repositories</a>
 
 	<div class="head">
 		<div class="head-left">
@@ -121,7 +122,7 @@
 				<div></div>
 			</div>
 			{#each repo.reviews as rv (rv.id)}
-				<a class="rrow" href="/repo/{repo.id}/review/{rv.id}">
+				<a class="rrow" href="{base}/repo/{repo.id}/review/{rv.id}">
 					<div class="mono rdate">{rv.dateLabel}</div>
 					<div class="mono rcommit">{rv.commit}</div>
 					<div class="rtrigger">{rv.trigger}</div>

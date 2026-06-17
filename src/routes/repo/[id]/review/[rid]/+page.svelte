@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { SEV_LABEL, SEV_VAR, SEV_BG_VAR } from '$lib/format';
 	import type { PageData } from './$types';
 
@@ -24,7 +25,7 @@
 <svelte:head><title>Hermes · {repo.id} {review.commit}</title></svelte:head>
 
 <main>
-	<a class="back mono" href="/repo/{repo.id}">← {repo.id} reviews</a>
+	<a class="back mono" href="{base}/repo/{repo.id}">← {repo.id} reviews</a>
 
 	<article class="report card">
 		<!-- header -->
