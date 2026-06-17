@@ -14,9 +14,11 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
 	},
 	"dependencies": {
-		"sanitize-html": "^2.17.5"
+		"sanitize-html": "^2.17.5",
+		"yaml": "^2.9.0"
 	},
 	"devDependencies": {
+		"@scalar/api-reference": "^1.60.0",
 		"@sveltejs/adapter-node": "^5.5.4",
 		"@sveltejs/kit": "^2.63.0",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
