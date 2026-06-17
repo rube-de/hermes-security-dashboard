@@ -155,6 +155,23 @@ banner additionally polls `GET /api/scan` so the agent's progress shows live.
 Base path `/api`. Reads are open; **writes** honour `HERMES_API_TOKEN` if set
 (`Authorization: Bearer <token>`), otherwise are unauthenticated.
 
+The producer is the Hermes agent itself: it runs the security review on a
+schedule (a cron-style task configured agent-side) and POSTs each result to the
+write endpoints below with `HERMES_API_TOKEN`. Nothing here schedules anything —
+the dashboard only stores and renders what the agent pushes. When the dashboard
+sits behind a reverse proxy that gates the UI (e.g. a SIWE wallet gateway), the
+scheduled job can't authenticate through that gate; it should reach the dashboard
+**directly on the internal network**, including the base-path prefix if one is
+baked in:
+
+```sh
+# push directly to the internal host, with the /security prefix and the token;
+# body is the same shape as "Submit a review report" below
+curl -X POST http://hermes-security-dashboard:3000/security/api/repos/:id/reviews \
+  -H "Authorization: Bearer $HERMES_API_TOKEN" \
+  -H 'content-type: application/json' -d '{ "commit": "…", "findings": [ … ] }'
+```
+
 | Method | Endpoint                     | Purpose                                |
 | ------ | ---------------------------- | -------------------------------------- |
 | GET    | `/api/health`                | Liveness check                         |
