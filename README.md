@@ -1,5 +1,7 @@
 # Hermes Security Dashboard
 
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 Dashboard for **Hermes**, an agent that periodically runs security reviews on
 Oasis Protocol GitHub repositories. It shows an overview of all repos and their
 findings by severity, a live "active run" indicator, and per-repo review history
