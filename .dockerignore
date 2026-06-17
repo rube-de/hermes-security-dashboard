@@ -18,3 +18,5 @@ Thumbs.db
 README.md
 Dockerfile
 .dockerignore
+compose.yaml
+.github

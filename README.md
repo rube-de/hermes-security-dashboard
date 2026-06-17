@@ -63,6 +63,36 @@ docker build --build-arg BASE_PATH=/security -t hermes-dashboard .
 docker run -p 3000:3000 -v hermes-data:/data hermes-dashboard
 ```
 
+### Compose
+
+`compose.yaml` is a ready-to-use reference (service, `/data` volume, env). Build
+from source — the base path is set at build time:
+
+```sh
+docker compose up --build -d                 # root
+BASE_PATH=/security docker compose up --build -d   # under /security
+```
+
+Or pull a published image instead by editing the `dashboard` service (comment
+out `build:`, point `image:` at a tag below). The file also includes a
+commented rclone sidecar sketch for the snapshot sync.
+
+### Published images
+
+CI publishes two variants to GHCR (the base path is baked, so each is a separate
+tag). Make the package public in the repo's Packages settings for anonymous pulls.
+
+```sh
+# root-path
+docker pull ghcr.io/rube-de/hermes-security-dashboard:latest
+# served under /security
+docker pull ghcr.io/rube-de/hermes-security-dashboard:latest-security
+```
+
+Also tagged per branch, short SHA, and semver (`vX.Y.Z` releases also produce the
+`-security` variant). A published image's base path **cannot** be changed at
+runtime — pick the matching tag, or build from source with your own `BASE_PATH`.
+
 ### Base path
 
 `BASE_PATH` is baked at **build time** (SvelteKit `paths.base`); it must start

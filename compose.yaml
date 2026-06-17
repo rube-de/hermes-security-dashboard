@@ -1,0 +1,60 @@
+# Reference deployment for the Hermes Security Dashboard.
+#
+# Two ways to run it — pick one for the `dashboard` service below:
+#
+#   A) BUILD FROM SOURCE (default). The base path is baked at build time, so set
+#      BASE_PATH for a sub-path deploy:
+#        BASE_PATH=/security docker compose up --build -d
+#
+#   B) PULL A PUBLISHED IMAGE. Comment out `build:` and point `image:` at the
+#      tag whose base path matches your deploy:
+#        image: ghcr.io/rube-de/hermes-security-dashboard:latest           # root
+#        image: ghcr.io/rube-de/hermes-security-dashboard:latest-security  # /security
+#      (A published image's base path is fixed — it cannot be changed at runtime.)
+name: hermes-dashboard
+
+services:
+  dashboard:
+    build:
+      context: .
+      args:
+        # '' → served at root; '/security' → served under that prefix (root 404s).
+        BASE_PATH: ${BASE_PATH:-}
+    image: hermes-security-dashboard:local
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      HERMES_DB: /data/hermes.db
+      # Start empty so the agent's real findings populate the dashboard. Set true
+      # to boot with demo data instead.
+      HERMES_SEED_DEMO: ${HERMES_SEED_DEMO:-false}
+      # Require a Bearer token on writes. Strongly recommended — without it the
+      # push API is open (the app logs a loud warning on startup).
+      # HERMES_API_TOKEN: ${HERMES_API_TOKEN:?set a long random secret}
+      # Snapshot cadence for the sync sidecar (seconds). Default 300.
+      # HERMES_SNAPSHOT_INTERVAL: 300
+    # Expose the port for direct access / local testing. Behind a reverse proxy
+    # on the same compose network you can drop this and reach `dashboard:3000`.
+    ports:
+      - ${PORT:-3000}:3000
+    volumes:
+      # Live DB, WAL, and the durability snapshot all live here. An external sync
+      # sidecar should copy ONLY hermes.db.snapshot — never the live .db/-wal/-shm.
+      - hermes-data:/data
+
+  # ---- Optional: durability sync sidecar (example, disabled) ----------------
+  # A separate container that periodically ships hermes.db.snapshot to object
+  # storage and restores it on a fresh volume. Shares the data volume read-only
+  # for the snapshot; wire it to your own rclone remote/config.
+  #
+  # sync:
+  #   image: rclone/rclone:latest
+  #   restart: unless-stopped
+  #   volumes:
+  #     - hermes-data:/data:ro
+  #     - ./rclone.conf:/config/rclone/rclone.conf:ro
+  #   entrypoint: ["sh", "-c", "while true; do rclone copyto /data/hermes.db.snapshot remote:hermes/hermes.db.snapshot; sleep 300; done"]
+
+volumes:
+  hermes-data:
