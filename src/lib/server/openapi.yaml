@@ -26,8 +26,12 @@ info:
 servers:
   - url: /
     description: Root-path deployment (BASE_PATH unset)
-  - url: /security
-    description: Sub-path deployment (image built with BASE_PATH=/security, e.g. behind the SIWE wallet gateway)
+  - url: /{basePath}
+    description: Sub-path deployment (image built with BASE_PATH, e.g. /security behind the SIWE wallet gateway)
+    variables:
+      basePath:
+        default: security
+        description: The value the image was built with, without the leading slash (e.g. security for BASE_PATH=/security).
 
 # Reads are open by default; write operations override with bearerAuth.
 security: []
