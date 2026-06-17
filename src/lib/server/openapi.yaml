@@ -1,0 +1,711 @@
+openapi: 3.1.0
+info:
+  title: Hermes Security Dashboard API
+  version: 1.0.0
+  description: |
+    HTTP API the Hermes agent uses to feed the security dashboard, plus the read
+    endpoints the UI consumes. The agent registers repositories, streams live
+    scan progress, and submits finished review reports; the dashboard stores and
+    renders them.
+
+    **Auth.** Reads are open. Writes (the agent-facing mutations) honour
+    `HERMES_API_TOKEN`: if it is set, they require `Authorization: Bearer <token>`
+    and return `401 {"error":"unauthorized"}` otherwise; if it is unset, writes
+    are unauthenticated (and the server logs a loud startup warning).
+
+    **Base path.** When the image is built with `BASE_PATH` (e.g. `/security`),
+    every path below — UI *and* `/api/*` — is served only under that prefix, and
+    the root 404s. Pick the matching `servers` entry.
+
+    This document is hand-maintained from the route handlers; it is not generated,
+    so treat the code as the source of truth if they ever diverge.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: /
+    description: Root-path deployment (BASE_PATH unset)
+  - url: /{basePath}
+    description: Sub-path deployment (image built with BASE_PATH, e.g. /security behind the SIWE wallet gateway)
+    variables:
+      basePath:
+        default: security
+        description: The value the image was built with, without the leading slash (e.g. security for BASE_PATH=/security).
+
+# Reads are open by default; write operations override with bearerAuth.
+security: []
+
+tags:
+  - name: System
+    description: Liveness
+  - name: Overview
+    description: Aggregate dashboard metrics
+  - name: Repositories
+    description: Repositories Hermes watches
+  - name: Reviews
+    description: Security review reports and history
+  - name: Scan
+    description: Live active-run state
+  - name: Trends
+    description: Daily aggregates
+
+paths:
+  /api/health:
+    get:
+      tags: [System]
+      operationId: getHealth
+      summary: Liveness check
+      responses:
+        '200':
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, service]
+                properties:
+                  ok: { type: boolean }
+                  service: { type: string }
+
+  /api/overview:
+    get:
+      tags: [Overview]
+      operationId: getOverview
+      summary: Aggregate metrics, per-repo summaries, and 14-day trend
+      responses:
+        '200':
+          description: Overview payload
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Overview' }
+
+  /api/repos:
+    get:
+      tags: [Repositories]
+      operationId: listRepos
+      summary: List repository summaries
+      responses:
+        '200':
+          description: All repositories with status from their latest review
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RepoSummary' }
+    post:
+      tags: [Repositories]
+      operationId: registerRepo
+      summary: Register or update a repository Hermes watches
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RepoRegister' }
+      responses:
+        '201':
+          description: Repository registered/updated; full detail returned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RepoDetail' }
+        '400':
+          description: Invalid JSON body, or missing `id`/`lang`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/repos/{id}:
+    get:
+      tags: [Repositories]
+      operationId: getRepo
+      summary: Repository detail with full review history
+      parameters:
+        - $ref: '#/components/parameters/RepoId'
+      responses:
+        '200':
+          description: Repository found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RepoDetail' }
+        '404':
+          description: Repository not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/repos/{id}/rerun:
+    get:
+      tags: [Repositories]
+      operationId: getRerun
+      summary: Whether a re-run is pending for this repo
+      parameters:
+        - $ref: '#/components/parameters/RepoId'
+      responses:
+        '200':
+          description: Current re-run request state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [repoId, requestedAt, pending]
+                properties:
+                  repoId: { type: string }
+                  requestedAt:
+                    type: [integer, 'null']
+                    description: Epoch-ms when last requested, or null
+                  pending: { type: boolean }
+        '404':
+          description: Repository not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      tags: [Repositories]
+      operationId: requestRerun
+      summary: Request a re-review on the next Hermes cycle
+      description: |
+        Open endpoint (no auth) — it records a user request from the UI; the agent
+        polls it and clears it when it next runs.
+      parameters:
+        - $ref: '#/components/parameters/RepoId'
+      responses:
+        '202':
+          description: Re-run request accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, repoId, requestedAt]
+                properties:
+                  ok: { const: true }
+                  repoId: { type: string }
+                  requestedAt: { type: integer, description: Epoch-ms }
+        '404':
+          description: Repository not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/repos/{id}/reviews:
+    get:
+      tags: [Reviews]
+      operationId: listRepoReviews
+      summary: Reviews for a repository (newest first)
+      parameters:
+        - $ref: '#/components/parameters/RepoId'
+      responses:
+        '200':
+          description: Review summaries for the repo
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ReviewSummary' }
+        '404':
+          description: Repository not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      tags: [Reviews]
+      operationId: submitReview
+      summary: Submit a security review report
+      description: |
+        Idempotent on `(repo, commit)`: resubmitting the same commit returns the
+        existing review with `duplicate: true` and HTTP 200 instead of creating a
+        new one. The new/carried/resolved diff is computed automatically against
+        the repo's previous review. The repository must be registered first.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RepoId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewInput' }
+      responses:
+        '201':
+          description: Review created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewSubmitResponse' }
+              example: { ok: true, reviewId: 8f3c…, repoId: sapphire-paratime, findings: 3 }
+        '200':
+          description: Review for this (repo, commit) already existed (idempotent)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewSubmitResponse' }
+              example: { ok: true, reviewId: 8f3c…, repoId: sapphire-paratime, duplicate: true }
+        '400':
+          description: Invalid JSON, missing `commit`, or an invalid finding
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Repository not found — register it first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/reviews:
+    get:
+      tags: [Reviews]
+      operationId: listReviews
+      summary: Flat review list across repos (newest first)
+      parameters:
+        - name: repo
+          in: query
+          required: false
+          schema: { type: string }
+          description: Scope to a single repository id
+        - name: since
+          in: query
+          required: false
+          schema: { type: string }
+          description: Inclusive lower bound on creation time — epoch-ms or ISO-8601
+        - name: until
+          in: query
+          required: false
+          schema: { type: string }
+          description: Inclusive upper bound on creation time — epoch-ms or ISO-8601
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+      responses:
+        '200':
+          description: Matching reviews
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewsResponse' }
+        '400':
+          description: Malformed time, or out-of-bounds/non-integer limit
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/reviews/{id}:
+    get:
+      tags: [Reviews]
+      operationId: getReview
+      summary: Single review with findings and diff
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+          description: Review UUID
+      responses:
+        '200':
+          description: Review found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewDetail' }
+        '404':
+          description: Review not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/scan:
+    get:
+      tags: [Scan]
+      operationId: getScan
+      summary: Current active-run state
+      responses:
+        '200':
+          description: Live scan state (singleton)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScanState' }
+    put:
+      tags: [Scan]
+      operationId: updateScan
+      summary: Update the live scan state
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScanUpdate' }
+      responses:
+        '200':
+          description: Updated scan state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScanState' }
+        '400':
+          description: Invalid JSON, or `active` missing/not a boolean
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Scan]
+      operationId: updateScanPost
+      summary: Alias for PUT /api/scan (identical behaviour)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScanUpdate' }
+      responses:
+        '200':
+          description: Updated scan state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScanState' }
+        '400':
+          description: Invalid JSON, or `active` missing/not a boolean
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/trends:
+    get:
+      tags: [Trends]
+      operationId: getTrends
+      summary: Daily new/resolved/review aggregates
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 365, default: 14 }
+        - name: repo
+          in: query
+          required: false
+          schema: { type: string }
+          description: Scope to a single repository id
+      responses:
+        '200':
+          description: Continuous, zero-filled daily buckets (oldest first)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrendsResponse' }
+        '400':
+          description: Invalid query parameter (e.g. non-integer days)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        `Authorization: Bearer <HERMES_API_TOKEN>`. Required on write operations
+        only when `HERMES_API_TOKEN` is set on the server.
+
+  parameters:
+    RepoId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+      description: Repository id (e.g. `sapphire-paratime`)
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token (when `HERMES_API_TOKEN` is set)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: unauthorized }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    Severity:
+      type: string
+      enum: [crit, high, med, low]
+      description: Finding severity
+
+    SeverityCounts:
+      type: object
+      required: [crit, high, med, low, total]
+      properties:
+        crit: { type: integer }
+        high: { type: integer }
+        med: { type: integer }
+        low: { type: integer }
+        total: { type: integer, description: Sum of crit + high + med + low }
+
+    RepoRegister:
+      type: object
+      required: [id, lang]
+      properties:
+        id: { type: string, description: Unique repository identifier }
+        lang: { type: string, description: 'Primary language (e.g. Solidity, Rust)' }
+        description: { type: string, default: '' }
+        path:
+          type: string
+          description: GitHub path; defaults to `oasisprotocol/{id}`
+        branch: { type: string, default: main }
+        lines: { type: integer, default: 0 }
+
+    RepoSummary:
+      type: object
+      description: Repository with status derived from its latest review.
+      required:
+        [id, lang, description, path, branch, lines, langColor, counts, status,
+         statusLabel, clean, glyph, scanning, lastRunLabel, lastDurationLabel, filesScanned]
+      properties:
+        id: { type: string }
+        lang: { type: string }
+        description: { type: string }
+        path: { type: string }
+        branch: { type: string }
+        lines: { type: integer }
+        langColor: { type: string, description: Hex colour for the language }
+        counts: { $ref: '#/components/schemas/SeverityCounts' }
+        status: { type: string, enum: [flagged, clean] }
+        statusLabel: { type: string }
+        clean: { type: boolean }
+        glyph: { type: string, description: '`[ok]` or `[!!]`' }
+        scanning: { type: boolean }
+        lastRunLabel: { type: string }
+        lastDurationLabel: { type: string }
+        filesScanned: { type: integer }
+
+    RepoDetail:
+      allOf:
+        - $ref: '#/components/schemas/RepoSummary'
+        - type: object
+          required: [reviews]
+          properties:
+            reviews:
+              type: array
+              description: Reviews for this repo, newest first
+              items: { $ref: '#/components/schemas/ReviewSummary' }
+
+    ReviewSummary:
+      type: object
+      description: Lightweight review row (no findings).
+      required:
+        [id, repoId, commit, trigger, createdAt, dateLabel, agoLabel, durationLabel,
+         durationSecs, counts, clean, newCount, resolvedCount, hasDelta]
+      properties:
+        id: { type: string, description: Review UUID }
+        repoId: { type: string }
+        commit: { type: string }
+        prevCommit:
+          type: [string, 'null']
+          description: Previous commit used for the diff, or null
+        trigger: { type: string, description: 'e.g. Scheduled, Push to main' }
+        createdAt: { type: integer, description: Epoch-ms }
+        dateLabel: { type: string }
+        agoLabel: { type: string }
+        durationLabel: { type: string }
+        durationSecs: { type: integer }
+        counts: { $ref: '#/components/schemas/SeverityCounts' }
+        clean: { type: boolean }
+        newCount: { type: integer }
+        resolvedCount: { type: integer }
+        hasDelta: { type: boolean }
+
+    ReviewDetail:
+      allOf:
+        - $ref: '#/components/schemas/ReviewSummary'
+        - type: object
+          required: [engine, summary, lines, filesScanned, findings, resolved, diff, hasPrev]
+          properties:
+            engine: { type: string, description: e.g. slither+semgrep+llm }
+            summary: { type: string }
+            lines: { type: integer }
+            filesScanned: { type: integer }
+            findings:
+              type: array
+              items: { $ref: '#/components/schemas/Finding' }
+            resolved:
+              type: array
+              items: { $ref: '#/components/schemas/ResolvedFinding' }
+            html:
+              type: [string, 'null']
+              description: Optional sanitized HTML report body
+            diff: { $ref: '#/components/schemas/ReviewDiff' }
+            hasPrev: { type: boolean }
+
+    ReviewDiff:
+      type: object
+      required: [newCount, carriedCount, resolvedCount]
+      properties:
+        newCount: { type: integer }
+        carriedCount: { type: integer, description: total - new }
+        resolvedCount: { type: integer }
+
+    FindingInput:
+      type: object
+      required: [severity, title]
+      properties:
+        severity: { $ref: '#/components/schemas/Severity' }
+        title: { type: string }
+        file: { type: string }
+        line: { type: integer }
+        cwe: { type: string, description: e.g. CWE-841 }
+        description: { type: string }
+        code: { type: string, description: Offending snippet }
+        recommendation: { type: string }
+
+    Finding:
+      type: object
+      description: A finding as returned in a review report.
+      required:
+        [severity, title, file, line, cwe, description, code, recommendation,
+         isNew, openRuns, ageHours]
+      properties:
+        severity: { $ref: '#/components/schemas/Severity' }
+        title: { type: string }
+        file: { type: string }
+        line: { type: integer }
+        cwe: { type: string }
+        description: { type: string }
+        code: { type: string }
+        recommendation: { type: string }
+        isNew: { type: boolean }
+        openRuns: { type: integer, description: Consecutive scan cycles open }
+        ageHours: { type: integer }
+
+    ResolvedFinding:
+      type: object
+      required: [severity, title, file]
+      properties:
+        severity: { $ref: '#/components/schemas/Severity' }
+        title: { type: string }
+        file: { type: string }
+
+    ReviewInput:
+      type: object
+      required: [commit]
+      properties:
+        commit: { type: string, description: Commit hash reviewed (drives idempotency) }
+        trigger: { type: string, default: Scheduled }
+        engine: { type: string, default: slither+semgrep+llm }
+        summary: { type: string, default: '' }
+        durationSecs: { type: integer, default: 0 }
+        lines:
+          type: integer
+          description: Defaults to the repo's registered line count if omitted
+        filesScanned: { type: integer, default: 0 }
+        html:
+          type: string
+          description: Optional pre-rendered report body; sanitized server-side
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/FindingInput' }
+
+    ReviewSubmitResponse:
+      type: object
+      required: [ok, reviewId, repoId]
+      properties:
+        ok: { const: true }
+        reviewId: { type: string }
+        repoId: { type: string }
+        findings:
+          type: integer
+          description: Number of findings stored (present on create / 201)
+        duplicate:
+          type: boolean
+          description: Present and true when the (repo, commit) already existed (200)
+
+    ReviewsResponse:
+      type: object
+      required: [count, reviews]
+      properties:
+        count: { type: integer }
+        reviews:
+          type: array
+          items: { $ref: '#/components/schemas/ReviewSummary' }
+
+    ScanState:
+      type: object
+      description: Singleton live active-run state.
+      required: [active, progress]
+      properties:
+        active: { type: boolean }
+        repoId: { type: [string, 'null'] }
+        commit: { type: [string, 'null'] }
+        currentFile: { type: [string, 'null'] }
+        progress: { type: number, description: 0–100 }
+        engine: { type: [string, 'null'] }
+        startedAt: { type: [integer, 'null'], description: Epoch-ms }
+
+    ScanUpdate:
+      type: object
+      required: [active]
+      properties:
+        active: { type: boolean, description: 'true during a scan, false when complete' }
+        repoId: { type: string }
+        commit: { type: string }
+        currentFile: { type: string }
+        progress: { type: number, description: 0–100; defaults to 0 }
+        engine: { type: string }
+        startedAt: { type: integer, description: Epoch-ms }
+
+    TrendBucket:
+      type: object
+      required: [day, date, newFindings, resolvedFindings, reviews]
+      properties:
+        day: { type: string, description: '`M/D` label, e.g. 6/15' }
+        date: { type: integer, description: 'Local midnight, epoch-ms' }
+        newFindings: { type: integer }
+        resolvedFindings: { type: integer }
+        reviews: { type: integer }
+
+    TrendsResponse:
+      type: object
+      required: [days, repo, buckets]
+      properties:
+        days: { type: integer }
+        repo: { type: [string, 'null'], description: 'Repo id if scoped, else null' }
+        buckets:
+          type: array
+          items: { $ref: '#/components/schemas/TrendBucket' }
+
+    TrendPoint:
+      type: object
+      required: [day, count]
+      properties:
+        day: { type: string }
+        count: { type: integer, description: New findings on the day }
+
+    Overview:
+      type: object
+      required:
+        [totals, flagged, clean, reposCount, reviewsAllTime, avgScanLabel, cadence,
+         cadenceHours, orgLabel, lastRunLabel, nextRunLabel, trend, repos]
+      properties:
+        totals: { $ref: '#/components/schemas/SeverityCounts' }
+        flagged: { type: integer, description: Repos with findings }
+        clean: { type: integer, description: Repos without findings }
+        reposCount: { type: integer }
+        reviewsAllTime: { type: integer }
+        avgScanLabel: { type: string }
+        cadence: { type: string, description: e.g. Every 6 hours }
+        cadenceHours: { type: integer }
+        orgLabel: { type: string }
+        lastRunLabel: { type: string }
+        nextRunLabel: { type: string }
+        trend:
+          type: array
+          items: { $ref: '#/components/schemas/TrendPoint' }
+        repos:
+          type: array
+          items: { $ref: '#/components/schemas/RepoSummary' }
