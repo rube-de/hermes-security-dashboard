@@ -152,6 +152,13 @@ banner additionally polls `GET /api/scan` so the agent's progress shows live.
 
 ## Agent API
 
+A machine-readable **OpenAPI 3.1** spec lives at
+[`static/openapi.yaml`](static/openapi.yaml) — served at `/openapi.yaml` (or
+`/security/openapi.yaml` under a sub-path deploy). View it in the
+[Swagger Editor](https://editor.swagger.io/) or with
+`bunx @redocly/cli preview-docs static/openapi.yaml`. The tables below mirror it;
+the route handlers remain the source of truth.
+
 Base path `/api`. Reads are open; **writes** honour `HERMES_API_TOKEN` if set
 (`Authorization: Bearer <token>`), otherwise are unauthenticated.
 
