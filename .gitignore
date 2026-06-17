@@ -26,6 +26,9 @@ vite.config.ts.timestamp-*
 *.db
 *.db-wal
 *.db-shm
+# Durability snapshots emitted for the external sync layer
+*.snapshot
+*.snapshot.tmp
 
 # Local reports / scratch
 .claude/files/

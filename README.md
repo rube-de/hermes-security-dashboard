@@ -35,13 +35,79 @@ On first boot the database is seeded with demo data (10 Oasis repos, realistic
 findings, review history, a live scan). It's a no-op once real data exists.
 
 Config via env (see `.env.example`): `HERMES_DB` (db path), `PORT`,
-`HERMES_API_TOKEN` (optional write auth).
+`HERMES_API_TOKEN` (optional write auth). For production — Docker, sub-path
+hosting, and durable storage — see [Deploy](#deploy).
 
 Drive the live UI like the real agent would:
 
 ```sh
 HERMES_URL=http://localhost:5173 node scripts/simulate-scan.mjs sapphire-paratime
 ```
+
+## Deploy
+
+### Docker
+
+Multi-stage build → a non-root Node 26 image (`node:sqlite` is built in) serving
+the `adapter-node` server. Only production dependencies are installed; the rest
+of the build output is self-contained.
+
+```sh
+# root-path deploy (default)
+docker build -t hermes-dashboard .
+
+# served under a sub-path behind a path-routing reverse proxy
+docker build --build-arg BASE_PATH=/security -t hermes-dashboard .
+
+# /data is the database volume; runs as UID:GID 10000:10000
+docker run -p 3000:3000 -v hermes-data:/data hermes-dashboard
+```
+
+### Base path
+
+`BASE_PATH` is baked at **build time** (SvelteKit `paths.base`); it must start
+with `/` and not end with `/`. With it set, the **entire app — UI *and*
+`/api/*` — responds only under that prefix, and the root 404s.** Every caller
+must include the prefix, including the Hermes agent's push API:
+
+```sh
+# built with BASE_PATH=/security → push to the prefixed URL
+curl -X POST localhost:3000/security/api/repos/sapphire-paratime/reviews ...
+# or with the simulator:
+HERMES_URL=http://localhost:3000/security node scripts/simulate-scan.mjs
+```
+
+Left unset, the app serves at the root exactly as before — `bun run dev` and
+root-path deploys are unchanged.
+
+### Durability (externally file-synced volume)
+
+In production `HERMES_DB` lives on a volume that a separate sidecar periodically
+file-copies to object storage and restores on redeploy. Copying a live SQLite
+file with an external tool is unsafe, so the live DB (WAL mode) is **never**
+copied directly. Instead the server:
+
+- emits a consistent snapshot (`VACUUM INTO` a temp file + atomic rename) on an
+  interval (`HERMES_SNAPSHOT_INTERVAL` seconds, default 300) **and** on graceful
+  shutdown (SIGTERM/SIGINT → final snapshot → exit 0);
+- checkpoints the WAL (`TRUNCATE`) each cycle so `-wal` stays bounded;
+- on startup, if the live DB is missing/empty but the snapshot exists, restores
+  it into place **before** seeding — so real synced data suppresses demo data.
+
+Point the sync sidecar at the snapshot file (default `${HERMES_DB}.snapshot`),
+**never** the live `.db` / `-wal` / `-shm`.
+
+### Environment
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `HERMES_DB` | `hermes.db` (`/data/hermes.db` in Docker) | Live SQLite path |
+| `PORT` / `HOST` | `3000` / `0.0.0.0` | adapter-node bind |
+| `HERMES_API_TOKEN` | _unset_ | Bearer auth for writes; unset = open (loud startup warning in production) |
+| `HERMES_SEED_DEMO` | `true` | Seed demo data on an empty DB; set `false` in production to start empty |
+| `HERMES_DB_SNAPSHOT` | `${HERMES_DB}.snapshot` | Snapshot file the sync layer copies |
+| `HERMES_SNAPSHOT_INTERVAL` | `300` | Seconds between snapshot/checkpoint cycles |
+| `BASE_PATH` | `''` | Sub-path prefix — **build arg**, baked at build time |
 
 ## Pages
 

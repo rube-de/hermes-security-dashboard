@@ -153,6 +153,13 @@ function resolvedToInput(r: { sev: Severity; title: string; file: string; line: 
 }
 
 export function seedIfEmpty(): void {
+	// Demo seeding is on by default (preserves dev / prototype behavior). Production
+	// sets HERMES_SEED_DEMO=false so the dashboard starts empty until the agent
+	// pushes real findings.
+	if (['false', '0', 'no', 'off'].includes((process.env.HERMES_SEED_DEMO ?? '').toLowerCase())) {
+		return;
+	}
+
 	const existing = db.prepare('SELECT COUNT(*) AS n FROM repos').get() as { n: number };
 	if (existing.n > 0) return;
 
