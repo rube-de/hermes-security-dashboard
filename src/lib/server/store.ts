@@ -297,6 +297,19 @@ export function listReviews(opts: ListReviewsOpts = {}, now = Date.now()): Revie
 /* review detail (with per-finding lifecycle + diff)                   */
 /* ------------------------------------------------------------------ */
 
+/** Index of the first element ≥ `target` in an ascending array (binary search).
+ *  `arr.length - lowerBound(arr, t)` is the count of elements ≥ t. */
+function lowerBound(sorted: number[], target: number): number {
+	let lo = 0;
+	let hi = sorted.length;
+	while (lo < hi) {
+		const mid = (lo + hi) >> 1;
+		if (sorted[mid] < target) lo = mid + 1;
+		else hi = mid;
+	}
+	return lo;
+}
+
 export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetail | null {
 	const rv = db.prepare('SELECT * FROM reviews WHERE id = ?').get(reviewId) as ReviewRow | undefined;
 	if (!rv) return null;
@@ -307,18 +320,19 @@ export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetai
 		)
 		.all(reviewId) as unknown as FindingRow[];
 
-	// Runs of this repo up to and including this review — the schedule is flexible,
-	// so "open N runs" is the actual count of reviews since the finding first showed
-	// up, not an age-÷-cadence estimate.
+	// Runs of this repo up to and including this review, oldest first — the schedule
+	// is flexible, so "open N runs" is the actual count of reviews since the finding
+	// first showed up, not an age-÷-cadence estimate. Sorted once here so each
+	// finding's count is a binary search instead of a full scan.
 	const runTimes = (
 		db
-			.prepare('SELECT created_at FROM reviews WHERE repo_id = ? AND created_at <= ?')
+			.prepare('SELECT created_at FROM reviews WHERE repo_id = ? AND created_at <= ? ORDER BY created_at')
 			.all(rv.repo_id, rv.created_at) as { created_at: number }[]
 	).map((r) => r.created_at);
 
 	const findings: Finding[] = rows.map((f) => {
 		const ageHours = Math.max(0, (rv.created_at - f.first_seen_at) / 3_600_000);
-		const openRuns = Math.max(1, runTimes.filter((t) => t >= f.first_seen_at).length);
+		const openRuns = Math.max(1, runTimes.length - lowerBound(runTimes, f.first_seen_at));
 		return {
 			severity: f.severity,
 			title: f.title,
