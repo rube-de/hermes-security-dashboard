@@ -93,8 +93,9 @@ export function setMeta(key: string, value: string): void {
 	).run(key, value);
 }
 
-function cadenceHours(): number {
-	return Number(getMeta('cadence_hours', '6')) || 6;
+/** Persist the agent-reported next planned run (epoch-ms). null/≤0 clears it. */
+export function setNextRun(at: number | null): void {
+	setMeta('next_run_at', String(at && at > 0 ? at : 0));
 }
 
 /* ------------------------------------------------------------------ */
@@ -296,10 +297,22 @@ export function listReviews(opts: ListReviewsOpts = {}, now = Date.now()): Revie
 /* review detail (with per-finding lifecycle + diff)                   */
 /* ------------------------------------------------------------------ */
 
+/** Index of the first element ≥ `target` in an ascending array (binary search).
+ *  `arr.length - lowerBound(arr, t)` is the count of elements ≥ t. */
+function lowerBound(sorted: number[], target: number): number {
+	let lo = 0;
+	let hi = sorted.length;
+	while (lo < hi) {
+		const mid = (lo + hi) >> 1;
+		if (sorted[mid] < target) lo = mid + 1;
+		else hi = mid;
+	}
+	return lo;
+}
+
 export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetail | null {
 	const rv = db.prepare('SELECT * FROM reviews WHERE id = ?').get(reviewId) as ReviewRow | undefined;
 	if (!rv) return null;
-	const ch = cadenceHours();
 	const rows = db
 		.prepare(
 			`SELECT * FROM findings WHERE review_id = ?
@@ -307,9 +320,19 @@ export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetai
 		)
 		.all(reviewId) as unknown as FindingRow[];
 
+	// Runs of this repo up to and including this review, oldest first — the schedule
+	// is flexible, so "open N runs" is the actual count of reviews since the finding
+	// first showed up, not an age-÷-cadence estimate. Sorted once here so each
+	// finding's count is a binary search instead of a full scan.
+	const runTimes = (
+		db
+			.prepare('SELECT created_at FROM reviews WHERE repo_id = ? AND created_at <= ? ORDER BY created_at')
+			.all(rv.repo_id, rv.created_at) as { created_at: number }[]
+	).map((r) => r.created_at);
+
 	const findings: Finding[] = rows.map((f) => {
 		const ageHours = Math.max(0, (rv.created_at - f.first_seen_at) / 3_600_000);
-		const openRuns = Math.max(1, Math.floor(ageHours / ch) + 1);
+		const openRuns = Math.max(1, runTimes.length - lowerBound(runTimes, f.first_seen_at));
 		return {
 			severity: f.severity,
 			title: f.title,
@@ -503,10 +526,15 @@ export function getOverview(now = Date.now()): Overview {
 	const avgRow = db.prepare('SELECT AVG(duration_secs) AS a FROM reviews').get() as { a: number | null };
 	const lastRow = db.prepare('SELECT MAX(created_at) AS m FROM reviews').get() as { m: number | null };
 
-	const ch = cadenceHours();
+	// Next run is whatever the agent last reported (meta.next_run_at); there is no
+	// fixed cadence to fall back on. Unset → null → "unscheduled".
 	const storedNext = Number(getMeta('next_run_at', '0'));
-	const nextRunAt =
-		storedNext > now ? storedNext : (lastRow.m ?? now) + ch * 3_600_000;
+	const nextRunAt = storedNext > 0 ? storedNext : null;
+	const nextRunLabel = !nextRunAt
+		? 'unscheduled'
+		: nextRunAt - now < 60_000
+			? 'due now'
+			: `in ${fmtUntil(nextRunAt, now)}`;
 
 	return {
 		totals,
@@ -515,11 +543,10 @@ export function getOverview(now = Date.now()): Overview {
 		reposCount: repos.length,
 		reviewsAllTime,
 		avgScanLabel: avgRow.a ? fmtDur(avgRow.a) : '—',
-		cadence: getMeta('cadence', 'Every 6 hours'),
-		cadenceHours: ch,
 		orgLabel: getMeta('org_label', 'Oasis Protocol'),
 		lastRunLabel: lastRow.m ? fmtAgo(lastRow.m, now) : 'never',
-		nextRunLabel: fmtUntil(nextRunAt, now),
+		nextRunAt,
+		nextRunLabel,
 		trend: getTrends(14, {}, now).map((b) => ({ day: b.day, count: b.newFindings }) satisfies TrendPoint),
 		repos
 	};

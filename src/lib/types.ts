@@ -116,10 +116,10 @@ export interface Overview {
 	reposCount: number;
 	reviewsAllTime: number;
 	avgScanLabel: string;
-	cadence: string;
-	cadenceHours: number;
 	orgLabel: string;
 	lastRunLabel: string;
+	/** Agent-reported next planned run (epoch-ms), or null if unscheduled. */
+	nextRunAt: number | null;
 	nextRunLabel: string;
 	trend: TrendPoint[];
 	repos: RepoSummary[];
