@@ -248,8 +248,10 @@ finding's `severity` + `title` are required; everything else is optional.
 
 `nextRunAt` (epoch-ms or ISO-8601) tells the dashboard when the agent plans to run
 next; it's rendered as **Next run** on the overview. The schedule is agent-driven —
-there is no fixed cadence — so omit it if unknown and the dashboard shows
-"unscheduled".
+there is no fixed cadence. The dashboard shows "unscheduled" until the agent first
+reports a value. The last reported next run then **persists**: omitting `nextRunAt`
+on a later submit keeps the previous value, and sending `nextRunAt: 0` clears it back
+to "unscheduled".
 
 ### Read reviews / trends
 

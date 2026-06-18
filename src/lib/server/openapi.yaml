@@ -612,7 +612,9 @@ components:
           description: >-
             When the agent plans its next review run — epoch-ms or ISO-8601. Shown
             as the dashboard "Next run". The schedule is agent-driven/flexible; there
-            is no fixed cadence. Omit if unknown.
+            is no fixed cadence. Persists until the agent reports a new value:
+            omitting it keeps the last reported next run; send 0 to clear it back to
+            "unscheduled".
         findings:
           type: array
           items: { $ref: '#/components/schemas/FindingInput' }
