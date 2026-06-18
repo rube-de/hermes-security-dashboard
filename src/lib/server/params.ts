@@ -21,15 +21,27 @@ export function readInt(
 	return { ok: true, value: v };
 }
 
+/**
+ * Coerce a value to epoch-ms: a finite number is taken as-is; a string is parsed
+ * as epoch-ms or ISO-8601. Returns null for null/undefined/empty/invalid input.
+ */
+export function parseTimeValue(raw: unknown): number | null {
+	if (raw === null || raw === undefined || raw === '') return null;
+	if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+	if (typeof raw !== 'string') return null;
+	const n = Number(raw);
+	if (Number.isFinite(n)) return n;
+	const t = Date.parse(raw);
+	return Number.isNaN(t) ? null : t;
+}
+
 /** Time query param: epoch-ms number or ISO-8601 string. Absent → undefined. */
 export function readTime(url: URL, name: string): ParamResult<number | undefined> {
 	const raw = url.searchParams.get(name);
 	if (raw === null || raw === '') return { ok: true, value: undefined };
-	const n = Number(raw);
-	if (Number.isFinite(n)) return { ok: true, value: n };
-	const t = Date.parse(raw);
-	if (Number.isNaN(t)) {
+	const v = parseTimeValue(raw);
+	if (v === null) {
 		return { ok: false, error: `\`${name}\` must be an epoch-ms number or ISO-8601 date` };
 	}
-	return { ok: true, value: t };
+	return { ok: true, value: v };
 }

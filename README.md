@@ -226,6 +226,7 @@ curl -X POST localhost:3000/api/repos/sapphire-paratime/reviews \
   "durationSecs": 231,
   "lines": 19200,
   "filesScanned": 80,
+  "nextRunAt": "2026-06-18T18:00:00Z",
   "findings": [
     {
       "severity": "crit",
@@ -244,6 +245,11 @@ curl -X POST localhost:3000/api/repos/sapphire-paratime/reviews \
 
 `severity` is one of `crit` | `high` | `med` | `low`. `commit` and each
 finding's `severity` + `title` are required; everything else is optional.
+
+`nextRunAt` (epoch-ms or ISO-8601) tells the dashboard when the agent plans to run
+next; it's rendered as **Next run** on the overview. The schedule is agent-driven —
+there is no fixed cadence — so omit it if unknown and the dashboard shows
+"unscheduled".
 
 ### Read reviews / trends
 
@@ -278,7 +284,7 @@ curl -X PUT localhost:3000/api/scan -H 'content-type: application/json' -d '{ "a
 ## Data model
 
 `node:sqlite` tables: `repos`, `reviews`, `findings`, `scan` (singleton live
-run), `meta` (cadence, org label, etc.). Findings carry a stable `fingerprint`
+run), `meta` (next run, org label, etc.). Findings carry a stable `fingerprint`
 (`file` + `title`) so the same issue is tracked run-over-run — that's what powers
 the new/carried/resolved diff and per-finding age ("open N runs"). Server data
 access lives in `src/lib/server/` (`db.ts`, `store.ts`, `seed.ts`,

@@ -1,6 +1,13 @@
 import { json } from '@sveltejs/kit';
-import { getRepoDetail, insertReview, findReviewByCommit, type FindingInput } from '$lib/server/store';
+import {
+	getRepoDetail,
+	insertReview,
+	findReviewByCommit,
+	setNextRun,
+	type FindingInput
+} from '$lib/server/store';
 import { checkWriteAuth } from '$lib/server/auth';
+import { parseTimeValue } from '$lib/server/params';
 import type { Severity } from '$lib/types';
 import type { RequestHandler } from './$types';
 
@@ -17,7 +24,8 @@ export const GET: RequestHandler = ({ params }) => {
  *   {
  *     commit, trigger?, engine?, summary?, durationSecs?, lines?, filesScanned?,
  *     findings: [{ severity, title, file?, line?, cwe?, description?, code?, recommendation? }],
- *     html?   // optional pre-rendered body; sanitized server-side before storage
+ *     html?,       // optional pre-rendered body; sanitized server-side before storage
+ *     nextRunAt?   // when the agent plans its next run (epoch-ms or ISO-8601); drives "Next run"
  *   }
  * The diff (new / carried / resolved) is computed automatically against the
  * repo's previous review.
@@ -40,11 +48,25 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	const commit = typeof body.commit === 'string' ? body.commit.trim() : '';
 	if (!commit) return json({ error: '`commit` (string) is required' }, { status: 400 });
 
+	// Planned next run is the agent's schedule, independent of this review's content —
+	// persist it whenever supplied, including on an idempotent re-submit below.
+	let nextRunAt: number | null = null;
+	if (body.nextRunAt !== undefined && body.nextRunAt !== null && body.nextRunAt !== '') {
+		nextRunAt = parseTimeValue(body.nextRunAt);
+		if (nextRunAt === null) {
+			return json(
+				{ error: '`nextRunAt` must be an epoch-ms number or ISO-8601 date' },
+				{ status: 400 }
+			);
+		}
+	}
+
 	// Idempotent on (repo, commit): a commit's code is immutable, so a re-submit is
 	// a retry (at-least-once delivery), not a new run. Return the existing review
 	// instead of inserting a duplicate zero-delta row that would pollute counts/trends.
 	const existing = findReviewByCommit(params.id, commit);
 	if (existing) {
+		if (nextRunAt !== null) setNextRun(nextRunAt);
 		return json(
 			{ ok: true, reviewId: existing, repoId: params.id, duplicate: true },
 			{ status: 200 }
@@ -88,6 +110,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			filesScanned: typeof body.filesScanned === 'number' ? body.filesScanned : undefined,
 			findings
 		});
+		if (nextRunAt !== null) setNextRun(nextRunAt);
 		return json({ ok: true, reviewId, repoId: params.id, findings: findings.length }, { status: 201 });
 	} catch (err) {
 		return json({ error: (err as Error).message }, { status: 400 });

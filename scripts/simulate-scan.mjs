@@ -60,6 +60,8 @@ async function main() {
 		durationSecs: Math.round((Date.now() - startedAt) / 1000),
 		lines: 19200,
 		filesScanned: 80,
+		// What the real agent knows from its own (flexible) schedule.
+		nextRunAt: Date.now() + 6 * 3600 * 1000,
 		findings: [
 			{
 				severity: 'crit',

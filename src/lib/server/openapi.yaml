@@ -607,6 +607,12 @@ components:
         html:
           type: string
           description: Optional pre-rendered report body; sanitized server-side
+        nextRunAt:
+          type: [integer, string]
+          description: >-
+            When the agent plans its next review run — epoch-ms or ISO-8601. Shown
+            as the dashboard "Next run". The schedule is agent-driven/flexible; there
+            is no fixed cadence. Omit if unknown.
         findings:
           type: array
           items: { $ref: '#/components/schemas/FindingInput' }
@@ -689,8 +695,8 @@ components:
     Overview:
       type: object
       required:
-        [totals, flagged, clean, reposCount, reviewsAllTime, avgScanLabel, cadence,
-         cadenceHours, orgLabel, lastRunLabel, nextRunLabel, trend, repos]
+        [totals, flagged, clean, reposCount, reviewsAllTime, avgScanLabel,
+         orgLabel, lastRunLabel, nextRunAt, nextRunLabel, trend, repos]
       properties:
         totals: { $ref: '#/components/schemas/SeverityCounts' }
         flagged: { type: integer, description: Repos with findings }
@@ -698,11 +704,12 @@ components:
         reposCount: { type: integer }
         reviewsAllTime: { type: integer }
         avgScanLabel: { type: string }
-        cadence: { type: string, description: e.g. Every 6 hours }
-        cadenceHours: { type: integer }
         orgLabel: { type: string }
         lastRunLabel: { type: string }
-        nextRunLabel: { type: string }
+        nextRunAt:
+          type: [integer, 'null']
+          description: Epoch-ms of the agent's next planned run, or null if unscheduled
+        nextRunLabel: { type: string, description: 'e.g. "in 3h 46m", "due now", "unscheduled"' }
         trend:
           type: array
           items: { $ref: '#/components/schemas/TrendPoint' }

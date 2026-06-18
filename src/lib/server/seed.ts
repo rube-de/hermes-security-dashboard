@@ -199,10 +199,9 @@ export function seedIfEmpty(): void {
 		}
 	});
 
-	setMeta('cadence', 'Every 6 hours');
-	setMeta('cadence_hours', '6');
 	setMeta('org_label', 'Oasis Protocol');
 	setMeta('accent', '#54E0BE');
+	// Demo next run; the real agent reports this on each review submit (no fixed cadence).
 	setMeta('next_run_at', String(base0 + 6 * HOUR));
 	// All-time review count includes history predating this dashboard.
 	setMeta('reviews_base', '1210');

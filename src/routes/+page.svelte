@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { scan } from '$lib/scan.svelte';
-	import { fmtInt, statusColor, SEV_VAR } from '$lib/format';
+	import { fmtInt, fmtDate, statusColor, SEV_VAR } from '$lib/format';
 	import SeverityPills from '$lib/components/SeverityPills.svelte';
 	import type { Severity } from '$lib/types';
 	import type { PageData } from './$types';
@@ -95,7 +95,7 @@
 			<h1 class="display">Repository Review Status</h1>
 			<p class="lede">
 				Hermes scans <strong>{o.reposCount}</strong>
-				{o.orgLabel} repositories · <strong>{o.cadence}</strong> · last run {o.lastRunLabel}
+				{o.orgLabel} repositories · last run {o.lastRunLabel}
 			</p>
 		</div>
 	</div>
@@ -174,8 +174,8 @@
 		</div>
 		<div class="card run">
 			<div class="klabel mono">Next run</div>
-			<div class="run-big display">in {o.nextRunLabel}</div>
-			<div class="muted sm">{o.cadence}</div>
+			<div class="run-big display">{o.nextRunLabel}</div>
+			<div class="muted sm">{o.nextRunAt ? fmtDate(o.nextRunAt) : '—'}</div>
 		</div>
 	</div>
 
