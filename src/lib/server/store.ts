@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { db } from './db';
 import { fingerprint } from './fingerprint';
+import { contentHash } from './content-hash';
 import { sanitizeReportHtml } from './sanitize';
 import {
 	countSeverities,
@@ -45,6 +46,7 @@ interface ReviewRow {
 	id: string;
 	repo_id: string;
 	commit_hash: string;
+	model: string;
 	trigger: string;
 	engine: string;
 	summary: string;
@@ -56,6 +58,7 @@ interface ReviewRow {
 	new_count: number;
 	resolved_count: number;
 	resolved_json: string;
+	content_hash: string | null;
 	created_at: number;
 }
 
@@ -170,17 +173,50 @@ function countsForReview(reviewId: string): SeverityCounts {
 	return c;
 }
 
+const SEV_RANK: Record<Severity, number> = { crit: 0, high: 1, med: 2, low: 3 };
+
+/**
+ * Severity counts for a repo's current commit, unioned across every scan of that
+ * commit. A commit can be scanned multiple times (non-deterministic re-runs,
+ * different models); a finding any scan flagged keeps the repo flagged, and on a
+ * severity disagreement the most severe rating wins. Findings are deduped by
+ * fingerprint so the same issue seen by two models counts once — hiding a real
+ * issue because the latest model happened to miss it is the wrong failure mode
+ * for a security board.
+ */
+function unionCountsForCommit(repoId: string, commit: string): SeverityCounts {
+	const rows = db
+		.prepare(
+			`SELECT f.fingerprint AS fp, f.severity AS severity
+			   FROM findings f JOIN reviews r ON f.review_id = r.id
+			  WHERE r.repo_id = ? AND r.commit_hash = ?`
+		)
+		.all(repoId, commit) as { fp: string; severity: Severity }[];
+	const worst = new Map<string, Severity>();
+	for (const row of rows) {
+		if (!VALID_SEV.has(row.severity)) continue;
+		const cur = worst.get(row.fp);
+		if (cur === undefined || SEV_RANK[row.severity] < SEV_RANK[cur]) worst.set(row.fp, row.severity);
+	}
+	const c = emptyCounts();
+	for (const sev of worst.values()) c[sev]++;
+	c.total = c.crit + c.high + c.med + c.low;
+	return c;
+}
+
 function latestReviewRow(repoId: string): ReviewRow | undefined {
 	return db
 		.prepare('SELECT * FROM reviews WHERE repo_id = ? ORDER BY created_at DESC LIMIT 1')
 		.get(repoId) as ReviewRow | undefined;
 }
 
-/** Existing review id for a (repo, commit) pair, or null. Drives idempotent submits. */
-export function findReviewByCommit(repoId: string, commit: string): string | null {
+/** Existing review id whose content matches `hash` (repo-scoped), or null. A scan's
+ *  content hash (commit + model + engine + finding set) is its identity, so this
+ *  drives idempotent resubmits — a delivery retry returns the existing review. */
+export function findReviewByHash(repoId: string, hash: string): string | null {
 	const row = db
-		.prepare('SELECT id FROM reviews WHERE repo_id = ? AND commit_hash = ? LIMIT 1')
-		.get(repoId, commit) as { id: string } | undefined;
+		.prepare('SELECT id FROM reviews WHERE repo_id = ? AND content_hash = ? LIMIT 1')
+		.get(repoId, hash) as { id: string } | undefined;
 	return row?.id ?? null;
 }
 
@@ -190,7 +226,9 @@ export function findReviewByCommit(repoId: string, commit: string): string | nul
 
 function buildRepoSummary(repo: RepoRow, scanRepoId: string | null, now: number): RepoSummary {
 	const latest = latestReviewRow(repo.id);
-	const counts = latest ? countsForReview(latest.id) : emptyCounts();
+	// Status reflects the *current commit* across all its scans, not just the newest
+	// row — see unionCountsForCommit.
+	const counts = latest ? unionCountsForCommit(repo.id, latest.commit_hash) : emptyCounts();
 	const status: 'flagged' | 'clean' = counts.total > 0 ? 'flagged' : 'clean';
 	return {
 		id: repo.id,
@@ -225,6 +263,7 @@ function reviewSummary(rv: ReviewRow, now: number): ReviewSummary {
 		id: rv.id,
 		repoId: rv.repo_id,
 		commit: rv.commit_hash,
+		model: rv.model,
 		prevCommit: rv.prev_commit,
 		trigger: rv.trigger,
 		createdAt: rv.created_at,
@@ -320,19 +359,29 @@ export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetai
 		)
 		.all(reviewId) as unknown as FindingRow[];
 
-	// Runs of this repo up to and including this review, oldest first — the schedule
-	// is flexible, so "open N runs" is the actual count of reviews since the finding
-	// first showed up, not an age-÷-cadence estimate. Sorted once here so each
-	// finding's count is a binary search instead of a full scan.
-	const runTimes = (
-		db
-			.prepare('SELECT created_at FROM reviews WHERE repo_id = ? AND created_at <= ? ORDER BY created_at')
-			.all(rv.repo_id, rv.created_at) as { created_at: number }[]
-	).map((r) => r.created_at);
+	// Runs of this repo up to and including this review, oldest first. "Open N runs"
+	// counts the distinct *commits* (code states) a finding has spanned since it was
+	// first seen — not raw scan rows, so re-scanning one commit several times (LLM
+	// re-runs, multiple models) doesn't inflate it. Sorted once here so each finding
+	// resolves to a binary search plus an O(1) suffix lookup.
+	const runRows = db
+		.prepare(
+			'SELECT created_at, commit_hash FROM reviews WHERE repo_id = ? AND created_at <= ? ORDER BY created_at'
+		)
+		.all(rv.repo_id, rv.created_at) as { created_at: number; commit_hash: string }[];
+	const runTimes = runRows.map((r) => r.created_at);
+	// distinctCommitsFrom[i] = number of distinct commits in runRows[i..end].
+	const distinctCommitsFrom = new Array<number>(runRows.length + 1);
+	distinctCommitsFrom[runRows.length] = 0;
+	const seenCommits = new Set<string>();
+	for (let i = runRows.length - 1; i >= 0; i--) {
+		distinctCommitsFrom[i] = distinctCommitsFrom[i + 1] + (seenCommits.has(runRows[i].commit_hash) ? 0 : 1);
+		seenCommits.add(runRows[i].commit_hash);
+	}
 
 	const findings: Finding[] = rows.map((f) => {
 		const ageHours = Math.max(0, (rv.created_at - f.first_seen_at) / 3_600_000);
-		const openRuns = Math.max(1, runTimes.length - lowerBound(runTimes, f.first_seen_at));
+		const openRuns = Math.max(1, distinctCommitsFrom[lowerBound(runTimes, f.first_seen_at)]);
 		return {
 			severity: f.severity,
 			title: f.title,
@@ -393,6 +442,7 @@ export interface FindingInput {
 
 export interface ReviewInput {
 	commit: string;
+	model?: string;
 	trigger?: string;
 	engine?: string;
 	summary?: string;
@@ -416,16 +466,40 @@ function tx<T>(fn: () => T): T {
 	}
 }
 
-export function insertReview(repoId: string, input: ReviewInput): string {
+export function insertReview(
+	repoId: string,
+	input: ReviewInput
+): { id: string; duplicate: boolean } {
 	const repo = getRepoRow(repoId);
 	if (!repo) throw new Error(`unknown repo: ${repoId}`);
 
 	const now = input.createdAt ?? Date.now();
 	const reviewId = randomUUID();
+	const model = input.model ?? '';
+	const engine = input.engine ?? 'slither+semgrep+llm';
 	const findings = (input.findings ?? []).filter((f) => VALID_SEV.has(f.severity));
 
-	// Previous review (latest existing for this repo) drives the diff.
-	const prev = latestReviewRow(repoId);
+	// Idempotent on scan content, not (repo, commit): a commit can be scanned many
+	// times. A resubmit with the same content (commit + model + engine + finding set)
+	// is an at-least-once delivery retry — return the existing review unchanged.
+	const hash = contentHash({
+		commit: input.commit,
+		model,
+		engine,
+		findings: findings.map((f) => ({ severity: f.severity, file: f.file, title: f.title }))
+	});
+	const dup = findReviewByHash(repoId, hash);
+	if (dup) return { id: dup, duplicate: true };
+
+	// Diff base is the latest scan on a *different* commit. Comparing two scans of
+	// the same commit would fabricate new/resolved churn out of pure model variance
+	// (the code didn't change), so same-commit re-scans diff against the prior code
+	// state instead.
+	const prev = db
+		.prepare(
+			'SELECT * FROM reviews WHERE repo_id = ? AND commit_hash != ? ORDER BY created_at DESC LIMIT 1'
+		)
+		.get(repoId, input.commit) as ReviewRow | undefined;
 	const prevFindings = prev
 		? (db
 				.prepare('SELECT severity, title, file, fingerprint FROM findings WHERE review_id = ?')
@@ -455,15 +529,16 @@ export function insertReview(repoId: string, input: ReviewInput): string {
 	tx(() => {
 		db.prepare(
 			`INSERT INTO reviews
-			 (id, repo_id, commit_hash, trigger, engine, summary, html, duration_secs, lines,
-			  files_scanned, prev_commit, new_count, resolved_count, resolved_json, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			 (id, repo_id, commit_hash, model, trigger, engine, summary, html, duration_secs, lines,
+			  files_scanned, prev_commit, new_count, resolved_count, resolved_json, content_hash, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		).run(
 			reviewId,
 			repoId,
 			input.commit,
+			model,
 			input.trigger ?? 'Scheduled',
-			input.engine ?? 'slither+semgrep+llm',
+			engine,
 			input.summary ?? '',
 			html,
 			input.durationSecs ?? 0,
@@ -473,6 +548,7 @@ export function insertReview(repoId: string, input: ReviewInput): string {
 			newCount,
 			resolved.length,
 			JSON.stringify(resolved),
+			hash,
 			now
 		);
 
@@ -501,7 +577,7 @@ export function insertReview(repoId: string, input: ReviewInput): string {
 		}
 	});
 
-	return reviewId;
+	return { id: reviewId, duplicate: false };
 }
 
 /* ------------------------------------------------------------------ */
@@ -583,26 +659,38 @@ export function getTrends(days = 14, opts: { repoId?: string } = {}, now = Date.
 	const today0 = startOfLocalDay(now);
 	const since = addLocalDays(today0, -(span - 1));
 
-	const where = ['created_at >= ?'];
+	const where = ['r.created_at >= ?'];
 	const params: (string | number)[] = [since];
 	if (opts.repoId) {
-		where.push('repo_id = ?');
+		where.push('r.repo_id = ?');
 		params.push(opts.repoId);
 	}
+	// new/resolved come only from the FIRST scan of each (repo, commit): that scan is
+	// the actual code-state transition. A commit scanned by several models (or re-run)
+	// would otherwise re-report the same delta against the prior commit on every scan,
+	// inflating the daily totals ~N×. `reviews` still counts every scan that ran.
 	const rows = db
-		.prepare(`SELECT created_at, new_count, resolved_count FROM reviews WHERE ${where.join(' AND ')}`)
+		.prepare(
+			`SELECT r.created_at AS created_at, r.new_count AS new_count, r.resolved_count AS resolved_count,
+			        (r.rowid = (SELECT MIN(r2.rowid) FROM reviews r2
+			                     WHERE r2.repo_id = r.repo_id AND r2.commit_hash = r.commit_hash)) AS is_first
+			   FROM reviews r WHERE ${where.join(' AND ')}`
+		)
 		.all(...params) as unknown as {
 		created_at: number;
 		new_count: number;
 		resolved_count: number;
+		is_first: number;
 	}[];
 
 	const agg = new Map<number, { n: number; r: number; reviews: number }>();
 	for (const row of rows) {
 		const key = startOfLocalDay(row.created_at);
 		const cur = agg.get(key) ?? { n: 0, r: 0, reviews: 0 };
-		cur.n += row.new_count;
-		cur.r += row.resolved_count;
+		if (row.is_first) {
+			cur.n += row.new_count;
+			cur.r += row.resolved_count;
+		}
 		cur.reviews += 1;
 		agg.set(key, cur);
 	}

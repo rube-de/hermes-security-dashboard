@@ -1,11 +1,5 @@
 import { json } from '@sveltejs/kit';
-import {
-	getRepoDetail,
-	insertReview,
-	findReviewByCommit,
-	setNextRun,
-	type FindingInput
-} from '$lib/server/store';
+import { getRepoDetail, insertReview, setNextRun, type FindingInput } from '$lib/server/store';
 import { checkWriteAuth } from '$lib/server/auth';
 import { parseTimeValue } from '$lib/server/params';
 import type { Severity } from '$lib/types';
@@ -22,13 +16,16 @@ export const GET: RequestHandler = ({ params }) => {
 /**
  * Submit a security review report for a repository. The Hermes agent posts:
  *   {
- *     commit, trigger?, engine?, summary?, durationSecs?, lines?, filesScanned?,
+ *     commit, model?, trigger?, engine?, summary?, durationSecs?, lines?, filesScanned?,
  *     findings: [{ severity, title, file?, line?, cwe?, description?, code?, recommendation? }],
  *     html?,       // optional pre-rendered body; sanitized server-side before storage
  *     nextRunAt?   // when the agent plans its next run (epoch-ms or ISO-8601); drives "Next run"
  *   }
- * The diff (new / carried / resolved) is computed automatically against the
- * repo's previous review.
+ * A commit can be scanned more than once (non-deterministic LLM re-runs, different
+ * models), so submits are idempotent on scan *content* — commit + model + engine +
+ * finding set — not on (repo, commit): a byte-equivalent resubmit returns the
+ * existing review, anything else is a new one. The diff (new / carried / resolved)
+ * is computed against the repo's latest scan on a *different* commit.
  */
 export const POST: RequestHandler = async ({ params, request }) => {
 	const denied = checkWriteAuth(request);
@@ -61,18 +58,6 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		}
 	}
 
-	// Idempotent on (repo, commit): a commit's code is immutable, so a re-submit is
-	// a retry (at-least-once delivery), not a new run. Return the existing review
-	// instead of inserting a duplicate zero-delta row that would pollute counts/trends.
-	const existing = findReviewByCommit(params.id, commit);
-	if (existing) {
-		if (nextRunAt !== null) setNextRun(nextRunAt);
-		return json(
-			{ ok: true, reviewId: existing, repoId: params.id, duplicate: true },
-			{ status: 200 }
-		);
-	}
-
 	const rawFindings = Array.isArray(body.findings) ? body.findings : [];
 	const findings: FindingInput[] = [];
 	for (let i = 0; i < rawFindings.length; i++) {
@@ -99,10 +84,13 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	}
 
 	try {
-		const reviewId = insertReview(params.id, {
+		const { id: reviewId, duplicate } = insertReview(params.id, {
 			commit,
+			model: typeof body.model === 'string' ? body.model.trim() : undefined,
 			trigger: typeof body.trigger === 'string' ? body.trigger : undefined,
-			engine: typeof body.engine === 'string' ? body.engine : undefined,
+			// Trimmed like commit/model: engine is part of the dedup identity, so a
+			// retry differing only in surrounding whitespace must still dedup.
+			engine: typeof body.engine === 'string' ? body.engine.trim() : undefined,
 			summary: typeof body.summary === 'string' ? body.summary : undefined,
 			html: typeof body.html === 'string' ? body.html : undefined,
 			durationSecs: typeof body.durationSecs === 'number' ? body.durationSecs : undefined,
@@ -110,7 +98,12 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			filesScanned: typeof body.filesScanned === 'number' ? body.filesScanned : undefined,
 			findings
 		});
+		// Schedule reporting is independent of review idempotency — persist nextRunAt
+		// on a deduped retry too.
 		if (nextRunAt !== null) setNextRun(nextRunAt);
+		if (duplicate) {
+			return json({ ok: true, reviewId, repoId: params.id, duplicate: true }, { status: 200 });
+		}
 		return json({ ok: true, reviewId, repoId: params.id, findings: findings.length }, { status: 201 });
 	} catch (err) {
 		return json({ error: (err as Error).message }, { status: 400 });

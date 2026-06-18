@@ -39,6 +39,8 @@ export interface ReviewSummary {
 	id: string;
 	repoId: string;
 	commit: string;
+	/** LLM model that produced the review (e.g. claude-opus-4-8); '' if unreported. */
+	model: string;
 	prevCommit: string | null;
 	trigger: string;
 	createdAt: number;

@@ -55,6 +55,7 @@ async function main() {
 
 	const review = {
 		commit: 'a3f9c21',
+		model: 'claude-opus-4-8',
 		trigger: 'Scheduled',
 		engine: 'slither+semgrep+llm',
 		durationSecs: Math.round((Date.now() - startedAt) / 1000),

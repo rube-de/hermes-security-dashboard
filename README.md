@@ -215,12 +215,14 @@ curl -X POST localhost:3000/api/repos -H 'content-type: application/json' -d '{
 `findings` is the structured form the dashboard renders into the report layout.
 `html` is **optional** — a pre-rendered report body that is sanitized
 server-side and shown below the structured findings. The diff (new / carried /
-resolved) is computed automatically against the repo's previous review.
+resolved) is computed automatically against the repo's latest scan on a
+*different* commit (so re-scanning one commit doesn't fabricate churn).
 
 ```sh
 curl -X POST localhost:3000/api/repos/sapphire-paratime/reviews \
   -H 'content-type: application/json' -d '{
   "commit": "a3f9c21",
+  "model": "claude-opus-4-8",
   "trigger": "Scheduled",
   "engine": "slither+semgrep+llm",
   "durationSecs": 231,
@@ -245,6 +247,20 @@ curl -X POST localhost:3000/api/repos/sapphire-paratime/reviews \
 
 `severity` is one of `crit` | `high` | `med` | `low`. `commit` and each
 finding's `severity` + `title` are required; everything else is optional.
+
+A commit can be scanned more than once — LLM reviews are non-deterministic, and you
+may run several models against the same code. Submits are therefore idempotent on
+scan **content**, not on `(repo, commit)`. The content key is `commit` + `model` +
+`engine` + the finding set, where each finding contributes only its `severity` +
+`file` + `title` (the same identity used for the new/carried/resolved diff). A
+resubmit with the same key returns the existing review (`duplicate: true`, HTTP 200);
+a re-run that finds a different issue, drops one, changes a severity, or runs a
+different `model` is stored as its own review. Note the key ignores a finding's
+`line`/`description`/`recommendation`/`code`, so a retry that only rewords those (or
+moves a line) dedups to the first report. Each scan shows up as its own row, newest
+first, with its `model`. A repo's headline status unions the findings across **all**
+scans of its current commit, so an issue one model flagged isn't hidden because a
+later model missed it.
 
 `nextRunAt` (epoch-ms or ISO-8601) tells the dashboard when the agent plans to run
 next; it's rendered as **Next run** on the overview. The schedule is agent-driven —

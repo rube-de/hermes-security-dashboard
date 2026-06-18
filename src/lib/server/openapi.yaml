@@ -215,10 +215,16 @@ paths:
       operationId: submitReview
       summary: Submit a security review report
       description: |
-        Idempotent on `(repo, commit)`: resubmitting the same commit returns the
-        existing review with `duplicate: true` and HTTP 200 instead of creating a
-        new one. The new/carried/resolved diff is computed automatically against
-        the repo's previous review. The repository must be registered first.
+        A commit can be scanned more than once (non-deterministic LLM re-runs,
+        different models), so submits are idempotent on scan **content**, not on
+        `(repo, commit)`. The content key is commit + model + engine + the finding
+        set, where each finding contributes only its severity + file + title (a
+        finding's line/description/recommendation/code are not part of the key). A
+        resubmit with the same key returns the existing review with `duplicate: true`
+        and HTTP 200; a different finding set, severity, or model creates a new
+        review. The new/carried/resolved diff is computed automatically against the
+        repo's latest scan on a *different* commit. The repository must be registered
+        first.
       security:
         - bearerAuth: []
       parameters:
@@ -236,7 +242,7 @@ paths:
               schema: { $ref: '#/components/schemas/ReviewSubmitResponse' }
               example: { ok: true, reviewId: 8f3c…, repoId: sapphire-paratime, findings: 3 }
         '200':
-          description: Review for this (repo, commit) already existed (idempotent)
+          description: A review with identical content already existed (idempotent retry)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReviewSubmitResponse' }
@@ -500,12 +506,13 @@ components:
       type: object
       description: Lightweight review row (no findings).
       required:
-        [id, repoId, commit, trigger, createdAt, dateLabel, agoLabel, durationLabel,
+        [id, repoId, commit, model, trigger, createdAt, dateLabel, agoLabel, durationLabel,
          durationSecs, counts, clean, newCount, resolvedCount, hasDelta]
       properties:
         id: { type: string, description: Review UUID }
         repoId: { type: string }
         commit: { type: string }
+        model: { type: string, description: 'LLM model that produced the review (e.g. claude-opus-4-8); '''' if unreported' }
         prevCommit:
           type: [string, 'null']
           description: Previous commit used for the diff, or null
@@ -595,7 +602,15 @@ components:
       type: object
       required: [commit]
       properties:
-        commit: { type: string, description: Commit hash reviewed (drives idempotency) }
+        commit: { type: string, description: Commit hash reviewed }
+        model:
+          type: string
+          default: ''
+          description: >-
+            LLM model that produced the review, e.g. claude-opus-4-8 or gpt-5.
+            Distinct from `engine` (the static-analysis tool stack). Part of the
+            dedup identity, so two models scanning the same commit are kept as
+            separate reviews. Shown per row on the repo's review history.
         trigger: { type: string, default: Scheduled }
         engine: { type: string, default: slither+semgrep+llm }
         summary: { type: string, default: '' }
@@ -631,7 +646,7 @@ components:
           description: Number of findings stored (present on create / 201)
         duplicate:
           type: boolean
-          description: Present and true when the (repo, commit) already existed (200)
+          description: Present and true when an identical-content review already existed (200)
 
     ReviewsResponse:
       type: object

@@ -116,6 +116,7 @@
 			<div class="thead mono">
 				<div>Date</div>
 				<div>Commit</div>
+				<div>Model</div>
 				<div>Trigger</div>
 				<div>Findings</div>
 				<div>Duration</div>
@@ -125,6 +126,7 @@
 				<a class="rrow" href="{base}/repo/{repo.id}/review/{rv.id}">
 					<div class="mono rdate">{rv.dateLabel}</div>
 					<div class="mono rcommit">{rv.commit}</div>
+					<div class="mono rmodel">{rv.model || '—'}</div>
 					<div class="rtrigger">{rv.trigger}</div>
 					<div class="rfind">
 						<SeverityPills counts={rv.counts} cleanLabel="✓ clean" />
@@ -339,7 +341,7 @@
 	.thead,
 	.rrow {
 		display: grid;
-		grid-template-columns: 1.3fr 1fr 1fr 1.6fr 0.8fr 32px;
+		grid-template-columns: 1.2fr 0.9fr 0.95fr 0.85fr 1.5fr 0.75fr 32px;
 		gap: 14px;
 		align-items: center;
 	}
@@ -370,6 +372,13 @@
 	.rcommit {
 		font-size: 13px;
 		color: var(--accent2);
+	}
+	.rmodel {
+		font-size: 12px;
+		color: var(--dim);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	.rtrigger {
 		font-size: 12px;
@@ -419,7 +428,7 @@
 		}
 		.rrow {
 			grid-template-columns: 1fr auto;
-			grid-template-areas: 'date chev' 'commit commit' 'find find' 'dur dur';
+			grid-template-areas: 'date chev' 'commit commit' 'model model' 'find find' 'dur dur';
 			gap: 6px;
 		}
 		.rdate {
@@ -427,6 +436,9 @@
 		}
 		.rcommit {
 			grid-area: commit;
+		}
+		.rmodel {
+			grid-area: model;
 		}
 		.rtrigger {
 			display: none;

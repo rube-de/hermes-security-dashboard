@@ -38,6 +38,7 @@
 			<div class="rmeta mono">
 				<span><span class="k">repository</span> {repo.path}</span>
 				<span><span class="k">commit</span> <span class="commit">{review.commit}</span></span>
+				{#if review.model}<span><span class="k">model</span> {review.model}</span>{/if}
 				<span><span class="k">generated</span> {review.dateLabel}</span>
 				<span><span class="k">duration</span> {review.durationLabel}</span>
 				<span><span class="k">lines</span> {review.lines.toLocaleString('en-US')}</span>
