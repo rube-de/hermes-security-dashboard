@@ -26,12 +26,16 @@ export function readInt(
  * as epoch-ms or ISO-8601. Returns null for null/undefined/empty/invalid input.
  */
 export function parseTimeValue(raw: unknown): number | null {
-	if (raw === null || raw === undefined || raw === '') return null;
+	if (raw === null || raw === undefined) return null;
 	if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
 	if (typeof raw !== 'string') return null;
-	const n = Number(raw);
+	// Trim first: Number('   ') === 0, so a whitespace-only string would otherwise
+	// parse as epoch 0 and (in the review route) silently clear the schedule.
+	const s = raw.trim();
+	if (s === '') return null;
+	const n = Number(s);
 	if (Number.isFinite(n)) return n;
-	const t = Date.parse(raw);
+	const t = Date.parse(s);
 	return Number.isNaN(t) ? null : t;
 }
 
