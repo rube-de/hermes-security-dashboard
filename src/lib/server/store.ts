@@ -28,11 +28,21 @@ import type {
 	ScanState,
 	Severity,
 	SeverityCounts,
+	Triage,
+	TriageStatus,
 	TrendBucket,
 	TrendPoint
 } from '$lib/types';
 
 const VALID_SEV = new Set<Severity>(['crit', 'high', 'med', 'low']);
+const VALID_TRIAGE = new Set<TriageStatus>(['acknowledged', 'false_positive', 'accepted_risk']);
+// The two verdicts that "quiet" a finding — drop it from actionable counts and a repo's
+// flagged/clean status at read time. `acknowledged` is deliberately NOT here: it marks a
+// finding as seen-but-real, so it keeps counting.
+const QUIETING = new Set<TriageStatus>(['false_positive', 'accepted_risk']);
+function quiets(t: { status: TriageStatus } | null | undefined): boolean {
+	return !!t && QUIETING.has(t.status);
+}
 
 interface RepoRow {
 	id: string;
@@ -161,6 +171,12 @@ function allRepoRows(): RepoRow[] {
 	return db.prepare('SELECT * FROM repos ORDER BY created_at ASC').all() as unknown as RepoRow[];
 }
 
+/** Cheap existence check for endpoints that only need to 404 on an unknown repo —
+ *  avoids the full summary build (head union + all review rows) getRepoDetail does. */
+export function repoExists(id: string): boolean {
+	return !!db.prepare('SELECT 1 FROM repos WHERE id = ? LIMIT 1').get(id);
+}
+
 /* ------------------------------------------------------------------ */
 /* counts / latest review                                              */
 /* ------------------------------------------------------------------ */
@@ -207,11 +223,6 @@ function unionFindingsForCommit(repoId: string, commit: string): UnionFinding[] 
 		else if (SEV_RANK[row.severity] < SEV_RANK[cur.severity]) cur.severity = row.severity;
 	}
 	return [...byFp.values()];
-}
-
-/** Severity counts for a repo's current commit, unioned across all its scans. */
-function unionCountsForCommit(repoId: string, commit: string): SeverityCounts {
-	return countSeverities(unionFindingsForCommit(repoId, commit));
 }
 
 /** Newest scan of a specific commit. Drives the repo card's "last scan" labels (so
@@ -266,7 +277,14 @@ function buildRepoSummary(repo: RepoRow, scanRepoId: string | null, now: number)
 	// code — changes neither. `head.scan` is the head commit's most recent scan.
 	const head = repoHead(repo.id);
 	const headScan = head ? latestReviewRowForCommit(repo.id, head.commit) : undefined;
-	const counts = head ? unionCountsForCommit(repo.id, head.commit) : emptyCounts();
+	// Quiet triaged findings out of the headline status at read time: a repo whose findings
+	// are all dismissed (false-positive / accepted-risk) reads clean; acknowledged keeps
+	// counting. quietedCount preserves how many were hidden for the "N triaged" label.
+	const union = head ? unionFindingsForCommit(repo.id, head.commit) : [];
+	const triage = triageMapForRepo(repo.id);
+	const open = union.filter((f) => !quiets(triage.get(f.fingerprint)));
+	const counts = countSeverities(open);
+	const quietedCount = union.length - open.length;
 	const status: 'flagged' | 'clean' = counts.total > 0 ? 'flagged' : 'clean';
 	return {
 		id: repo.id,
@@ -277,6 +295,7 @@ function buildRepoSummary(repo: RepoRow, scanRepoId: string | null, now: number)
 		lines: repo.lines,
 		langColor: langColor(repo.lang),
 		counts,
+		quietedCount,
 		status,
 		statusLabel:
 			status === 'clean' ? 'Clean' : `${counts.total} issue${counts.total > 1 ? 's' : ''}`,
@@ -380,6 +399,36 @@ export function listReviews(opts: ListReviewsOpts = {}, now = Date.now()): Revie
 // SEVERITIES holds only fixed internal keys, so interpolation here is injection-safe.
 const SEV_ORDER_SQL = `CASE severity ${SEVERITIES.map((s, i) => `WHEN '${s}' THEN ${i}`).join(' ')} ELSE ${SEVERITIES.length} END`;
 
+/**
+ * Every human triage verdict for a repo, keyed by finding fingerprint. One repo-scoped
+ * PK query, joined onto findings at read time — a tag survives every agent re-run untouched
+ * because insertReview never writes this table. Unknown statuses are dropped defensively.
+ */
+function triageMapForRepo(repoId: string): Map<string, Triage> {
+	const rows = db
+		.prepare(
+			'SELECT fingerprint, status, note, created_at, updated_at FROM finding_triage WHERE repo_id = ?'
+		)
+		.all(repoId) as {
+		fingerprint: string;
+		status: TriageStatus;
+		note: string;
+		created_at: number;
+		updated_at: number;
+	}[];
+	const m = new Map<string, Triage>();
+	for (const r of rows) {
+		if (!VALID_TRIAGE.has(r.status)) continue;
+		m.set(r.fingerprint, {
+			status: r.status,
+			note: r.note,
+			createdAt: r.created_at,
+			updatedAt: r.updated_at
+		});
+	}
+	return m;
+}
+
 export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetail | null {
 	const rv = db.prepare('SELECT * FROM reviews WHERE id = ?').get(reviewId) as ReviewRow | undefined;
 	if (!rv) return null;
@@ -394,6 +443,9 @@ export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetai
 	const runRows = db
 		.prepare('SELECT created_at, commit_hash FROM reviews WHERE repo_id = ? AND created_at <= ?')
 		.all(rv.repo_id, rv.created_at) as { created_at: number; commit_hash: string }[];
+
+	// Human triage verdicts for this repo, joined onto findings by fingerprint below.
+	const triage = triageMapForRepo(rv.repo_id);
 
 	const findings: Finding[] = rows.map((f) => {
 		const ageHours = Math.max(0, (rv.created_at - f.first_seen_at) / 3_600_000);
@@ -414,22 +466,31 @@ export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetai
 			recommendation: f.recommendation,
 			isNew: f.is_new === 1,
 			openRuns,
-			ageHours: Math.round(ageHours)
+			ageHours: Math.round(ageHours),
+			fingerprint: f.fingerprint,
+			triage: triage.get(f.fingerprint) ?? null
 		};
 	});
 
-	const counts = countSeverities(rows);
+	// Quiet dismissed findings from the band counts — they remain in `findings` (dimmed),
+	// just don't tally toward the severity totals shown above the list.
+	const openRows = rows.filter((f) => !quiets(triage.get(f.fingerprint)));
+	const counts = countSeverities(openRows);
+	const quietedCount = rows.length - openRows.length;
 	let resolved: ResolvedFinding[] = [];
 	try {
 		resolved = JSON.parse(rv.resolved_json) as ResolvedFinding[];
 	} catch {
 		resolved = [];
 	}
+	// A dismissed finding the agent later stops reporting must not read as a "fix".
+	resolved = resolved.filter((rf) => !quiets(triage.get(fingerprint(rf.file, rf.title))));
 
 	const summary = reviewSummary(rv, now);
 	return {
 		...summary,
 		counts,
+		quietedCount,
 		engine: rv.engine,
 		summary: rv.summary,
 		lines: rv.lines,
@@ -444,6 +505,58 @@ export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetai
 		},
 		hasPrev: !!rv.prev_commit
 	};
+}
+
+/* ------------------------------------------------------------------ */
+/* finding triage (human verdicts; survive agent re-runs)              */
+/* ------------------------------------------------------------------ */
+
+/** Latest stored title/file for a finding identity, or null if no finding in the repo
+ *  carries this fingerprint. The authoritative source for the tag-time snapshot. */
+function findingIdentity(repoId: string, fp: string): { title: string; file: string } | null {
+	const row = db
+		.prepare(
+			'SELECT title, file FROM findings WHERE repo_id = ? AND fingerprint = ? ORDER BY first_seen_at DESC, id DESC LIMIT 1'
+		)
+		.get(repoId, fp) as { title: string; file: string } | undefined;
+	return row ?? null;
+}
+
+/**
+ * Upsert a human triage verdict for a finding identity. Last-write-wins on the single
+ * (repo_id, fingerprint) row; created_at is preserved across updates, updated_at moves.
+ * Returns false WITHOUT writing if no finding in the repo carries this fingerprint, so the
+ * caller can 404 rather than store an orphan tag. The fp_title/fp_file snapshot is taken
+ * from the finding itself, not the caller, so it can't be spoofed.
+ */
+export function setTriage(
+	repoId: string,
+	fp: string,
+	status: TriageStatus,
+	note = '',
+	at = Date.now()
+): boolean {
+	const ident = findingIdentity(repoId, fp);
+	if (!ident) return false;
+	db.prepare(
+		`INSERT INTO finding_triage
+		 (repo_id, fingerprint, status, note, fp_title, fp_file, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(repo_id, fingerprint) DO UPDATE SET
+		   status = excluded.status,
+		   note = excluded.note,
+		   updated_at = excluded.updated_at`
+	).run(repoId, fp, status, note, ident.title, ident.file, at, at);
+	return true;
+}
+
+/** Clear a finding's triage verdict (back to open/untriaged). Idempotent; returns whether
+ *  a row was actually removed. */
+export function clearTriage(repoId: string, fp: string): boolean {
+	const r = db
+		.prepare('DELETE FROM finding_triage WHERE repo_id = ? AND fingerprint = ?')
+		.run(repoId, fp);
+	return r.changes > 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -620,11 +733,13 @@ export function insertReview(
 export function getOverview(now = Date.now()): Overview {
 	const repos = listRepoSummaries(now);
 	const totals = emptyCounts();
+	let quietedTotal = 0;
 	for (const r of repos) {
 		totals.crit += r.counts.crit;
 		totals.high += r.counts.high;
 		totals.med += r.counts.med;
 		totals.low += r.counts.low;
+		quietedTotal += r.quietedCount;
 	}
 	totals.total = totals.crit + totals.high + totals.med + totals.low;
 
@@ -647,6 +762,7 @@ export function getOverview(now = Date.now()): Overview {
 
 	return {
 		totals,
+		quietedTotal,
 		flagged,
 		clean: repos.length - flagged,
 		reposCount: repos.length,

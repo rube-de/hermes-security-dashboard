@@ -1,11 +1,26 @@
 <script lang="ts">
 	import { base } from '$app/paths';
-	import { SEV_LABEL, SEV_VAR, SEV_BG_VAR } from '$lib/format';
+	import { SvelteMap } from 'svelte/reactivity';
+	import { SEV_LABEL, SEV_VAR, SEV_BG_VAR, TRIAGE_LABEL } from '$lib/format';
+	import FindingTriage from '$lib/components/FindingTriage.svelte';
+	import type { Triage } from '$lib/types';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 	const review = $derived(data.review);
 	const repo = $derived(data.repo);
+
+	// Optimistic overlay of triage edits made on this page, keyed by fingerprint.
+	// triageOf() reads this first, falling back to the server-loaded verdict, so a
+	// just-applied tag renders immediately without a reload — one source of truth.
+	const edits = new SvelteMap<string, Triage | null>();
+	function triageOf(f: PageData['review']['findings'][number]): Triage | null {
+		const e = edits.get(f.fingerprint);
+		return e !== undefined ? e : f.triage;
+	}
+	function isDismissed(t: Triage | null): boolean {
+		return !!t && (t.status === 'false_positive' || t.status === 'accepted_risk');
+	}
 
 	const summaryText = $derived(
 		review.summary ||
@@ -67,6 +82,12 @@
 
 		<!-- exec summary -->
 		<div class="section">
+			{#if review.quietedCount > 0}
+				<div class="qnote mono">
+					{review.quietedCount} finding{review.quietedCount > 1 ? 's' : ''} triaged out of the
+					counts above (false-positive / accepted-risk) — still listed below, dimmed.
+				</div>
+			{/if}
 			<div class="slabel mono">Summary</div>
 			<p class="summary">{summaryText}</p>
 		</div>
@@ -94,8 +115,9 @@
 				<p class="noissues mono">No findings at this commit — repository is clean. ✓</p>
 			{/if}
 			<div class="flist">
-				{#each review.findings as f, i (i)}
-					<div class="finding">
+				{#each review.findings as f (f.fingerprint)}
+					{@const t = triageOf(f)}
+					<div class="finding" class:dismissed={isDismissed(t)}>
 						<div class="fbar" style="background:{SEV_VAR[f.severity]}"></div>
 						<div class="fbody">
 							<div class="frow">
@@ -106,6 +128,7 @@
 								>
 								<span class="mono fcwe">{f.cwe}</span>
 								<span class="life mono" class:new={f.isNew}>{lifeText(f)}</span>
+								{#if t}<span class="tflag {t.status}">{TRIAGE_LABEL[t.status]}</span>{/if}
 								<span class="mono floc">{f.file}:{f.line}</span>
 							</div>
 							<div class="ftitle display">{f.title}</div>
@@ -116,6 +139,14 @@
 							<div class="frec">
 								<span class="arrow">→</span>
 								<div><strong class="reck">Recommendation.</strong> {f.recommendation}</div>
+							</div>
+							<div class="ftriage">
+								<FindingTriage
+									repoId={repo.id}
+									fingerprint={f.fingerprint}
+									current={t}
+									onChanged={(nt) => edits.set(f.fingerprint, nt)}
+								/>
 							</div>
 						</div>
 					</div>
@@ -281,6 +312,12 @@
 		line-height: 1.65;
 		color: var(--dim);
 	}
+	.qnote {
+		margin: 0 0 16px;
+		font-size: 12px;
+		color: var(--faint);
+		line-height: 1.5;
+	}
 
 	.diff {
 		display: flex;
@@ -394,6 +431,40 @@
 		font-size: 12px;
 		color: var(--accent2);
 		margin-left: auto;
+	}
+	.tflag {
+		display: inline-flex;
+		align-items: center;
+		padding: 3px 8px;
+		border-radius: 5px;
+		font-family: 'IBM Plex Mono', monospace;
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+	.tflag.acknowledged {
+		background: var(--surface2);
+		color: var(--accent2);
+	}
+	.tflag.false_positive {
+		background: var(--surface2);
+		color: var(--faint);
+	}
+	.tflag.accepted_risk {
+		background: var(--medB);
+		color: var(--med);
+	}
+	.ftriage {
+		margin-top: 12px;
+	}
+	.finding.dismissed {
+		opacity: 0.5;
+		transition: opacity 0.15s;
+	}
+	.finding.dismissed:hover {
+		opacity: 1;
 	}
 	.ftitle {
 		font-weight: 600;

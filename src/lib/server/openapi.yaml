@@ -190,6 +190,60 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/repos/{id}/findings/{fingerprint}/triage:
+    put:
+      tags: [Repositories]
+      operationId: setFindingTriage
+      summary: Set or clear a human triage verdict on a finding
+      description: |
+        Open endpoint (no auth) — a dashboard user affordance, not an agent data write.
+        Keyed on the finding's stable fingerprint so the verdict persists across agent
+        re-runs. `status: open` (or null) clears the verdict. Setting a verdict 404s if
+        no finding in the repo currently carries the fingerprint; clearing is idempotent.
+      parameters:
+        - $ref: '#/components/parameters/RepoId'
+        - $ref: '#/components/parameters/Fingerprint'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: [string, 'null']
+                  enum: [open, acknowledged, false_positive, accepted_risk, null]
+                  description: A verdict to set; `open` or `null` clears the verdict.
+                note: { type: string, description: Free-text justification }
+      responses:
+        '200':
+          description: Verdict set or cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, status]
+                properties:
+                  ok: { const: true }
+                  status:
+                    type: string
+                    enum: [open, acknowledged, false_positive, accepted_risk]
+                  note: { type: string }
+                  cleared:
+                    type: boolean
+                    description: Present on a clear; whether a row was actually removed
+        '400':
+          description: Invalid JSON body or status value
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Repository, or finding with that fingerprint, not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/repos/{id}/reviews:
     get:
       tags: [Reviews]
@@ -424,6 +478,12 @@ components:
       required: true
       schema: { type: string }
       description: Repository id (e.g. `sapphire-paratime`)
+    Fingerprint:
+      name: fingerprint
+      in: path
+      required: true
+      schema: { type: string }
+      description: Stable finding identity — the `fingerprint` field of a Finding
 
   responses:
     Unauthorized:
@@ -474,7 +534,7 @@ components:
         Repository with status derived from its current commit (the most recently
         introduced one), unioned across all of that commit's scans.
       required:
-        [id, lang, description, path, branch, lines, langColor, counts, status,
+        [id, lang, description, path, branch, lines, langColor, counts, quietedCount, status,
          statusLabel, clean, glyph, scanning, lastRunLabel, lastDurationLabel, filesScanned,
          headCommit, headScanCount]
       properties:
@@ -488,7 +548,12 @@ components:
         counts:
           allOf:
             - $ref: '#/components/schemas/SeverityCounts'
-          description: Union of findings across every scan of the current commit.
+          description: >-
+            Union of findings across every scan of the current commit, excluding those
+            quieted by triage (false-positive / accepted-risk).
+        quietedCount:
+          type: integer
+          description: Head-commit findings hidden from `counts` by triage.
         status: { type: string, enum: [flagged, clean] }
         statusLabel: { type: string }
         clean: { type: boolean }
@@ -545,7 +610,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/ReviewSummary'
         - type: object
-          required: [engine, summary, lines, filesScanned, findings, resolved, diff, hasPrev]
+          required: [engine, summary, lines, filesScanned, findings, quietedCount, resolved, diff, hasPrev]
           properties:
             engine: { type: string, description: e.g. slither+semgrep+llm }
             summary: { type: string }
@@ -554,6 +619,9 @@ components:
             findings:
               type: array
               items: { $ref: '#/components/schemas/Finding' }
+            quietedCount:
+              type: integer
+              description: Findings excluded from `counts` by triage (still present in `findings`).
             resolved:
               type: array
               items: { $ref: '#/components/schemas/ResolvedFinding' }
@@ -589,7 +657,7 @@ components:
       description: A finding as returned in a review report.
       required:
         [severity, title, file, line, cwe, description, code, recommendation,
-         isNew, openRuns, ageHours]
+         isNew, openRuns, ageHours, fingerprint, triage]
       properties:
         severity: { $ref: '#/components/schemas/Severity' }
         title: { type: string }
@@ -602,6 +670,30 @@ components:
         isNew: { type: boolean }
         openRuns: { type: integer, description: Consecutive scan cycles open }
         ageHours: { type: integer }
+        fingerprint:
+          type: string
+          description: >-
+            Stable per-repo finding identity (sha1 of file+title). The key a triage
+            verdict is attached to and addressed by.
+        triage:
+          oneOf:
+            - $ref: '#/components/schemas/Triage'
+            - type: 'null'
+          description: Human triage verdict, or null when untriaged ("open").
+
+    Triage:
+      type: object
+      description: >-
+        Human triage verdict on a finding, persisted across agent re-runs. acknowledged
+        still counts toward a repo's status; false_positive and accepted_risk quiet it.
+      required: [status, note, createdAt, updatedAt]
+      properties:
+        status:
+          type: string
+          enum: [acknowledged, false_positive, accepted_risk]
+        note: { type: string, description: Free-text justification }
+        createdAt: { type: integer, description: First tagged (epoch-ms) }
+        updatedAt: { type: integer, description: Last changed (epoch-ms) }
 
     ResolvedFinding:
       type: object
@@ -725,10 +817,13 @@ components:
     Overview:
       type: object
       required:
-        [totals, flagged, clean, reposCount, reviewsAllTime, avgScanLabel,
+        [totals, quietedTotal, flagged, clean, reposCount, reviewsAllTime, avgScanLabel,
          orgLabel, lastRunLabel, nextRunAt, nextRunLabel, trend, repos]
       properties:
         totals: { $ref: '#/components/schemas/SeverityCounts' }
+        quietedTotal:
+          type: integer
+          description: Findings quieted by triage across all repos (excluded from `totals`).
         flagged: { type: integer, description: Repos with findings }
         clean: { type: integer, description: Repos without findings }
         reposCount: { type: integer }

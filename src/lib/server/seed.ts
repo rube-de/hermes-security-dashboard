@@ -202,7 +202,7 @@ export function seedIfEmpty(): void {
 
 	// Demonstrate multiple scans per commit: a second model re-scans sapphire-paratime's
 	// latest commit and surfaces one issue the first model missed. Repo status unions the
-	// scans of the current commit (see unionCountsForCommit), so this extra finding still
+	// scans of the current commit (see unionFindingsForCommit), so this extra finding still
 	// counts even though it isn't on the single newest scan alone.
 	const sapphireSeed = RAW.findIndex((r) => r.id === 'sapphire-paratime');
 	const sapphire = RAW[sapphireSeed];

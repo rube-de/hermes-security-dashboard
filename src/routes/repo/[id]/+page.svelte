@@ -114,6 +114,13 @@
 		</p>
 	{/if}
 
+	{#if repo.quietedCount > 0}
+		<p class="union-note mono">
+			{repo.quietedCount} finding{repo.quietedCount > 1 ? 's' : ''} hidden from the counts above —
+			triaged as false-positive or accepted-risk.
+		</p>
+	{/if}
+
 	<section class="history">
 		<div class="hist-head">
 			<h2 class="display">Review history</h2>

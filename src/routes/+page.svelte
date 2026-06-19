@@ -105,7 +105,9 @@
 		<div class="card big">
 			<div class="big-head">
 				<div class="muted">Open findings across all repos</div>
-				<div class="mono faint">{totals.total} tracked</div>
+				<div class="mono faint">
+					{totals.total} tracked{#if o.quietedTotal} · {o.quietedTotal} triaged{/if}
+				</div>
 			</div>
 			<div class="big-num-row">
 				<div class="big-num display">{totals.total}</div>

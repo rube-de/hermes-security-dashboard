@@ -9,6 +9,19 @@ export interface SeverityCounts {
 	total: number;
 }
 
+/** Human triage verdict on a finding, persisted across agent re-runs and keyed on the
+ *  finding's stable (repo, fingerprint) identity. `acknowledged` still counts toward a
+ *  repo's status; `false_positive` and `accepted_risk` quiet it. */
+export type TriageStatus = 'acknowledged' | 'false_positive' | 'accepted_risk';
+
+export interface Triage {
+	status: TriageStatus;
+	/** Free-text justification — expected for false_positive / accepted_risk. */
+	note: string;
+	createdAt: number;
+	updatedAt: number;
+}
+
 /** A single security finding as rendered in a report. */
 export interface Finding {
 	severity: Severity;
@@ -25,6 +38,10 @@ export interface Finding {
 	openRuns: number;
 	/** Age in hours since first detected. */
 	ageHours: number;
+	/** Stable per-repo finding identity (sha1 of file+title) — addresses triage writes. */
+	fingerprint: string;
+	/** Human triage verdict, or null when untriaged ("open"). */
+	triage: Triage | null;
 }
 
 /** A resolved finding (present in the prior run, gone now). */
@@ -62,6 +79,9 @@ export interface ReviewDetail extends ReviewSummary {
 	lines: number;
 	filesScanned: number;
 	findings: Finding[];
+	/** Findings excluded from `counts` by triage (false-positive / accepted-risk). They
+	 *  still appear in `findings` (rendered dimmed). */
+	quietedCount: number;
 	resolved: ResolvedFinding[];
 	html: string | null;
 	diff: { newCount: number; carriedCount: number; resolvedCount: number };
@@ -77,8 +97,12 @@ export interface RepoSummary {
 	branch: string;
 	lines: number;
 	langColor: string;
-	/** Status counts: the union of findings across all scans of the current commit. */
+	/** Status counts: the union of findings across all scans of the current commit,
+	 *  excluding findings quieted by triage (false-positive / accepted-risk). */
 	counts: SeverityCounts;
+	/** How many head-commit findings were quieted out of `counts` by triage. Raw total
+	 *  is `counts.total + quietedCount`. */
+	quietedCount: number;
 	status: 'flagged' | 'clean';
 	statusLabel: string;
 	clean: boolean;
@@ -118,6 +142,9 @@ export interface TrendBucket {
 
 export interface Overview {
 	totals: SeverityCounts;
+	/** Findings quieted by triage (false-positive / accepted-risk) across all repos —
+	 *  excluded from `totals`. */
+	quietedTotal: number;
 	flagged: number;
 	clean: number;
 	reposCount: number;
