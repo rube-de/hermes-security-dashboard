@@ -203,6 +203,10 @@ function backfillContentHashes(): void {
 	const upd = db.prepare('UPDATE reviews SET content_hash = ? WHERE id = ?');
 	for (const r of rows) {
 		const findings = findingsStmt.all(r.id) as { severity: string; file: string; title: string }[];
+		// contentHash() canonicalizes the finding set (drops unknown severities, collapses
+		// same-fingerprint duplicates) and trims commit/model/engine, so a legacy row whose
+		// findings predate that canonicalization still hashes to what a faithful resubmit
+		// produces — there's no value left to normalize here.
 		const h = contentHash({
 			commit: r.commit_hash,
 			model: r.model ?? '',

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { db } from './db';
 import { fingerprint } from './fingerprint';
-import { contentHash } from './content-hash';
+import { canonicalFindings, contentHash } from './content-hash';
 import { sanitizeReportHtml } from './sanitize';
 import {
 	countSeverities,
@@ -498,18 +498,13 @@ export function insertReview(
 	const reviewId = randomUUID();
 	const model = input.model ?? '';
 	const engine = input.engine ?? 'slither+semgrep+llm';
-	// Collapse findings that share a fingerprint (same file+title) within one scan,
-	// keeping the most severe — otherwise a model emitting the same issue twice would
-	// count it twice in new_count and the per-review totals while the fingerprint-deduped
-	// union counts it once, diverging the surfaces.
-	const byFp = new Map<string, FindingInput>();
-	for (const f of input.findings ?? []) {
-		if (!VALID_SEV.has(f.severity)) continue;
-		const fp = fingerprint(f.file ?? '', f.title);
-		const ex = byFp.get(fp);
-		if (!ex || SEV_RANK[f.severity] < SEV_RANK[ex.severity]) byFp.set(fp, f);
-	}
-	const findings = [...byFp.values()];
+	// Reduce to the canonical finding set used for BOTH storage and identity: drop
+	// unknown severities, then collapse same-fingerprint findings to the most severe
+	// (otherwise the same issue emitted twice would inflate new_count and the per-
+	// review totals while the deduped union counts it once). contentHash() applies the
+	// identical reduction, so the rows we store match the hash we dedup on — and a
+	// migration backfill of a legacy row lands on the hash a faithful resubmit yields.
+	const findings = canonicalFindings(input.findings ?? []);
 
 	// Idempotent on scan content, not (repo, commit): a commit can be scanned many
 	// times. A resubmit with the same content (commit + model + engine + finding set)
