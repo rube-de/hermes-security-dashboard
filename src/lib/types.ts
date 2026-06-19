@@ -79,6 +79,9 @@ export interface ReviewDetail extends ReviewSummary {
 	lines: number;
 	filesScanned: number;
 	findings: Finding[];
+	/** Findings excluded from `counts` by triage (false-positive / accepted-risk). They
+	 *  still appear in `findings` (rendered dimmed). */
+	quietedCount: number;
 	resolved: ResolvedFinding[];
 	html: string | null;
 	diff: { newCount: number; carriedCount: number; resolvedCount: number };
@@ -94,8 +97,12 @@ export interface RepoSummary {
 	branch: string;
 	lines: number;
 	langColor: string;
-	/** Status counts: the union of findings across all scans of the current commit. */
+	/** Status counts: the union of findings across all scans of the current commit,
+	 *  excluding findings quieted by triage (false-positive / accepted-risk). */
 	counts: SeverityCounts;
+	/** How many head-commit findings were quieted out of `counts` by triage. Raw total
+	 *  is `counts.total + quietedCount`. */
+	quietedCount: number;
 	status: 'flagged' | 'clean';
 	statusLabel: string;
 	clean: boolean;
@@ -135,6 +142,9 @@ export interface TrendBucket {
 
 export interface Overview {
 	totals: SeverityCounts;
+	/** Findings quieted by triage (false-positive / accepted-risk) across all repos —
+	 *  excluded from `totals`. */
+	quietedTotal: number;
 	flagged: number;
 	clean: number;
 	reposCount: number;

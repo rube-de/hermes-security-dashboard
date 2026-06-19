@@ -36,6 +36,13 @@ import type {
 
 const VALID_SEV = new Set<Severity>(['crit', 'high', 'med', 'low']);
 const VALID_TRIAGE = new Set<TriageStatus>(['acknowledged', 'false_positive', 'accepted_risk']);
+// The two verdicts that "quiet" a finding — drop it from actionable counts and a repo's
+// flagged/clean status at read time. `acknowledged` is deliberately NOT here: it marks a
+// finding as seen-but-real, so it keeps counting.
+const QUIETING = new Set<TriageStatus>(['false_positive', 'accepted_risk']);
+function quiets(t: { status: TriageStatus } | null | undefined): boolean {
+	return !!t && QUIETING.has(t.status);
+}
 
 interface RepoRow {
 	id: string;
@@ -212,11 +219,6 @@ function unionFindingsForCommit(repoId: string, commit: string): UnionFinding[] 
 	return [...byFp.values()];
 }
 
-/** Severity counts for a repo's current commit, unioned across all its scans. */
-function unionCountsForCommit(repoId: string, commit: string): SeverityCounts {
-	return countSeverities(unionFindingsForCommit(repoId, commit));
-}
-
 /** Newest scan of a specific commit. Drives the repo card's "last scan" labels (so
  *  they describe the same commit the headline counts come from). rowid DESC breaks
  *  created_at ties deterministically. */
@@ -269,7 +271,14 @@ function buildRepoSummary(repo: RepoRow, scanRepoId: string | null, now: number)
 	// code — changes neither. `head.scan` is the head commit's most recent scan.
 	const head = repoHead(repo.id);
 	const headScan = head ? latestReviewRowForCommit(repo.id, head.commit) : undefined;
-	const counts = head ? unionCountsForCommit(repo.id, head.commit) : emptyCounts();
+	// Quiet triaged findings out of the headline status at read time: a repo whose findings
+	// are all dismissed (false-positive / accepted-risk) reads clean; acknowledged keeps
+	// counting. quietedCount preserves how many were hidden for the "N triaged" label.
+	const union = head ? unionFindingsForCommit(repo.id, head.commit) : [];
+	const triage = triageMapForRepo(repo.id);
+	const open = union.filter((f) => !quiets(triage.get(f.fingerprint)));
+	const counts = countSeverities(open);
+	const quietedCount = union.length - open.length;
 	const status: 'flagged' | 'clean' = counts.total > 0 ? 'flagged' : 'clean';
 	return {
 		id: repo.id,
@@ -280,6 +289,7 @@ function buildRepoSummary(repo: RepoRow, scanRepoId: string | null, now: number)
 		lines: repo.lines,
 		langColor: langColor(repo.lang),
 		counts,
+		quietedCount,
 		status,
 		statusLabel:
 			status === 'clean' ? 'Clean' : `${counts.total} issue${counts.total > 1 ? 's' : ''}`,
@@ -456,18 +466,25 @@ export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetai
 		};
 	});
 
-	const counts = countSeverities(rows);
+	// Quiet dismissed findings from the band counts — they remain in `findings` (dimmed),
+	// just don't tally toward the severity totals shown above the list.
+	const openRows = rows.filter((f) => !quiets(triage.get(f.fingerprint)));
+	const counts = countSeverities(openRows);
+	const quietedCount = rows.length - openRows.length;
 	let resolved: ResolvedFinding[] = [];
 	try {
 		resolved = JSON.parse(rv.resolved_json) as ResolvedFinding[];
 	} catch {
 		resolved = [];
 	}
+	// A dismissed finding the agent later stops reporting must not read as a "fix".
+	resolved = resolved.filter((rf) => !quiets(triage.get(fingerprint(rf.file, rf.title))));
 
 	const summary = reviewSummary(rv, now);
 	return {
 		...summary,
 		counts,
+		quietedCount,
 		engine: rv.engine,
 		summary: rv.summary,
 		lines: rv.lines,
@@ -710,11 +727,13 @@ export function insertReview(
 export function getOverview(now = Date.now()): Overview {
 	const repos = listRepoSummaries(now);
 	const totals = emptyCounts();
+	let quietedTotal = 0;
 	for (const r of repos) {
 		totals.crit += r.counts.crit;
 		totals.high += r.counts.high;
 		totals.med += r.counts.med;
 		totals.low += r.counts.low;
+		quietedTotal += r.quietedCount;
 	}
 	totals.total = totals.crit + totals.high + totals.med + totals.low;
 
@@ -737,6 +756,7 @@ export function getOverview(now = Date.now()): Overview {
 
 	return {
 		totals,
+		quietedTotal,
 		flagged,
 		clean: repos.length - flagged,
 		reposCount: repos.length,

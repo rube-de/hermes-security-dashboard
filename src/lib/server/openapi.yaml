@@ -533,7 +533,7 @@ components:
         Repository with status derived from its current commit (the most recently
         introduced one), unioned across all of that commit's scans.
       required:
-        [id, lang, description, path, branch, lines, langColor, counts, status,
+        [id, lang, description, path, branch, lines, langColor, counts, quietedCount, status,
          statusLabel, clean, glyph, scanning, lastRunLabel, lastDurationLabel, filesScanned,
          headCommit, headScanCount]
       properties:
@@ -547,7 +547,12 @@ components:
         counts:
           allOf:
             - $ref: '#/components/schemas/SeverityCounts'
-          description: Union of findings across every scan of the current commit.
+          description: >-
+            Union of findings across every scan of the current commit, excluding those
+            quieted by triage (false-positive / accepted-risk).
+        quietedCount:
+          type: integer
+          description: Head-commit findings hidden from `counts` by triage.
         status: { type: string, enum: [flagged, clean] }
         statusLabel: { type: string }
         clean: { type: boolean }
@@ -604,7 +609,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/ReviewSummary'
         - type: object
-          required: [engine, summary, lines, filesScanned, findings, resolved, diff, hasPrev]
+          required: [engine, summary, lines, filesScanned, findings, quietedCount, resolved, diff, hasPrev]
           properties:
             engine: { type: string, description: e.g. slither+semgrep+llm }
             summary: { type: string }
@@ -613,6 +618,9 @@ components:
             findings:
               type: array
               items: { $ref: '#/components/schemas/Finding' }
+            quietedCount:
+              type: integer
+              description: Findings excluded from `counts` by triage (still present in `findings`).
             resolved:
               type: array
               items: { $ref: '#/components/schemas/ResolvedFinding' }
@@ -808,10 +816,13 @@ components:
     Overview:
       type: object
       required:
-        [totals, flagged, clean, reposCount, reviewsAllTime, avgScanLabel,
+        [totals, quietedTotal, flagged, clean, reposCount, reviewsAllTime, avgScanLabel,
          orgLabel, lastRunLabel, nextRunAt, nextRunLabel, trend, repos]
       properties:
         totals: { $ref: '#/components/schemas/SeverityCounts' }
+        quietedTotal:
+          type: integer
+          description: Findings quieted by triage across all repos (excluded from `totals`).
         flagged: { type: integer, description: Repos with findings }
         clean: { type: integer, description: Repos without findings }
         reposCount: { type: integer }

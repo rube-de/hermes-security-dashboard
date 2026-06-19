@@ -82,6 +82,12 @@
 
 		<!-- exec summary -->
 		<div class="section">
+			{#if review.quietedCount > 0}
+				<div class="qnote mono">
+					{review.quietedCount} finding{review.quietedCount > 1 ? 's' : ''} triaged out of the
+					counts above (false-positive / accepted-risk) — still listed below, dimmed.
+				</div>
+			{/if}
 			<div class="slabel mono">Summary</div>
 			<p class="summary">{summaryText}</p>
 		</div>
@@ -305,6 +311,12 @@
 		font-size: 15px;
 		line-height: 1.65;
 		color: var(--dim);
+	}
+	.qnote {
+		margin: 0 0 16px;
+		font-size: 12px;
+		color: var(--faint);
+		line-height: 1.5;
 	}
 
 	.diff {
