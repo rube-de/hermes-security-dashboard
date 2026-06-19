@@ -97,6 +97,25 @@ CREATE TABLE IF NOT EXISTS findings (
 CREATE INDEX IF NOT EXISTS idx_findings_review ON findings(review_id);
 CREATE INDEX IF NOT EXISTS idx_findings_fp ON findings(repo_id, fingerprint);
 
+-- Human triage of a finding (acknowledged / false-positive / accepted-risk). Keyed on
+-- (repo_id, fingerprint) — the SAME stable identity the new/carried/resolved diff rides —
+-- so a tag re-attaches on every agent re-run and across multi-model scans of a commit, and
+-- the append-only insertReview write path never touches it. Absence of a row means
+-- "open/untriaged"; clearing a tag deletes the row. fp_title/fp_file snapshot the finding
+-- text at tag time so future drift-repair (when a rephrase shifts the fingerprint) is
+-- possible without a migration.
+CREATE TABLE IF NOT EXISTS finding_triage (
+  repo_id     TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+  fingerprint TEXT NOT NULL,
+  status      TEXT NOT NULL,
+  note        TEXT NOT NULL DEFAULT '',
+  fp_title    TEXT NOT NULL DEFAULT '',
+  fp_file     TEXT NOT NULL DEFAULT '',
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  PRIMARY KEY (repo_id, fingerprint)
+);
+
 CREATE TABLE IF NOT EXISTS scan (
   id           INTEGER PRIMARY KEY CHECK (id = 1),
   active       INTEGER NOT NULL DEFAULT 0,

@@ -28,11 +28,14 @@ import type {
 	ScanState,
 	Severity,
 	SeverityCounts,
+	Triage,
+	TriageStatus,
 	TrendBucket,
 	TrendPoint
 } from '$lib/types';
 
 const VALID_SEV = new Set<Severity>(['crit', 'high', 'med', 'low']);
+const VALID_TRIAGE = new Set<TriageStatus>(['acknowledged', 'false_positive', 'accepted_risk']);
 
 interface RepoRow {
 	id: string;
@@ -380,6 +383,36 @@ export function listReviews(opts: ListReviewsOpts = {}, now = Date.now()): Revie
 // SEVERITIES holds only fixed internal keys, so interpolation here is injection-safe.
 const SEV_ORDER_SQL = `CASE severity ${SEVERITIES.map((s, i) => `WHEN '${s}' THEN ${i}`).join(' ')} ELSE ${SEVERITIES.length} END`;
 
+/**
+ * Every human triage verdict for a repo, keyed by finding fingerprint. One repo-scoped
+ * PK query, joined onto findings at read time — a tag survives every agent re-run untouched
+ * because insertReview never writes this table. Unknown statuses are dropped defensively.
+ */
+function triageMapForRepo(repoId: string): Map<string, Triage> {
+	const rows = db
+		.prepare(
+			'SELECT fingerprint, status, note, created_at, updated_at FROM finding_triage WHERE repo_id = ?'
+		)
+		.all(repoId) as {
+		fingerprint: string;
+		status: TriageStatus;
+		note: string;
+		created_at: number;
+		updated_at: number;
+	}[];
+	const m = new Map<string, Triage>();
+	for (const r of rows) {
+		if (!VALID_TRIAGE.has(r.status)) continue;
+		m.set(r.fingerprint, {
+			status: r.status,
+			note: r.note,
+			createdAt: r.created_at,
+			updatedAt: r.updated_at
+		});
+	}
+	return m;
+}
+
 export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetail | null {
 	const rv = db.prepare('SELECT * FROM reviews WHERE id = ?').get(reviewId) as ReviewRow | undefined;
 	if (!rv) return null;
@@ -394,6 +427,9 @@ export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetai
 	const runRows = db
 		.prepare('SELECT created_at, commit_hash FROM reviews WHERE repo_id = ? AND created_at <= ?')
 		.all(rv.repo_id, rv.created_at) as { created_at: number; commit_hash: string }[];
+
+	// Human triage verdicts for this repo, joined onto findings by fingerprint below.
+	const triage = triageMapForRepo(rv.repo_id);
 
 	const findings: Finding[] = rows.map((f) => {
 		const ageHours = Math.max(0, (rv.created_at - f.first_seen_at) / 3_600_000);
@@ -414,7 +450,9 @@ export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetai
 			recommendation: f.recommendation,
 			isNew: f.is_new === 1,
 			openRuns,
-			ageHours: Math.round(ageHours)
+			ageHours: Math.round(ageHours),
+			fingerprint: f.fingerprint,
+			triage: triage.get(f.fingerprint) ?? null
 		};
 	});
 

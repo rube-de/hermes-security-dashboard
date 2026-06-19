@@ -589,7 +589,7 @@ components:
       description: A finding as returned in a review report.
       required:
         [severity, title, file, line, cwe, description, code, recommendation,
-         isNew, openRuns, ageHours]
+         isNew, openRuns, ageHours, fingerprint, triage]
       properties:
         severity: { $ref: '#/components/schemas/Severity' }
         title: { type: string }
@@ -602,6 +602,30 @@ components:
         isNew: { type: boolean }
         openRuns: { type: integer, description: Consecutive scan cycles open }
         ageHours: { type: integer }
+        fingerprint:
+          type: string
+          description: >-
+            Stable per-repo finding identity (sha1 of file+title). The key a triage
+            verdict is attached to and addressed by.
+        triage:
+          oneOf:
+            - $ref: '#/components/schemas/Triage'
+            - type: 'null'
+          description: Human triage verdict, or null when untriaged ("open").
+
+    Triage:
+      type: object
+      description: >-
+        Human triage verdict on a finding, persisted across agent re-runs. acknowledged
+        still counts toward a repo's status; false_positive and accepted_risk quiet it.
+      required: [status, note, createdAt, updatedAt]
+      properties:
+        status:
+          type: string
+          enum: [acknowledged, false_positive, accepted_risk]
+        note: { type: string, description: Free-text justification }
+        createdAt: { type: integer, description: First tagged (epoch-ms) }
+        updatedAt: { type: integer, description: Last changed (epoch-ms) }
 
     ResolvedFinding:
       type: object
