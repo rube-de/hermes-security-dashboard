@@ -189,6 +189,7 @@ export function seedIfEmpty(): void {
 				commit: COMMITS[(seed + k) % COMMITS.length],
 				trigger: k % 4 === 2 ? 'Push to main' : 'Scheduled',
 				engine: 'slither+semgrep+llm',
+				model: 'claude-opus-4-8',
 				durationSecs,
 				lines,
 				filesScanned,
@@ -197,6 +198,37 @@ export function seedIfEmpty(): void {
 			};
 			insertReview(repo.id, review);
 		}
+	});
+
+	// Demonstrate multiple scans per commit: a second model re-scans sapphire-paratime's
+	// latest commit and surfaces one issue the first model missed. Repo status unions the
+	// scans of the current commit (see unionCountsForCommit), so this extra finding still
+	// counts even though it isn't on the single newest scan alone.
+	const sapphireSeed = RAW.findIndex((r) => r.id === 'sapphire-paratime');
+	const sapphire = RAW[sapphireSeed];
+	insertReview('sapphire-paratime', {
+		commit: COMMITS[sapphireSeed % COMMITS.length], // == this repo's latest (k=0) commit
+		trigger: 'Scheduled',
+		engine: 'slither+semgrep+llm',
+		model: 'gpt-5',
+		durationSecs: 198,
+		lines: 7600 + sapphireSeed * 2350,
+		filesScanned: 54 + sapphireSeed * 13,
+		createdAt: base0 + 60_000, // 1 min after the latest claude scan → newest row
+		findings: [
+			...sapphire.findings.map(toInput),
+			{
+				severity: 'high',
+				title: 'Signature malleability in permit() path',
+				file: 'contracts/ConfidentialVault.sol',
+				line: 168,
+				cwe: 'CWE-347',
+				description:
+					'The ecrecover result is accepted without rejecting the high-s malleable form, so a second valid signature exists for the same permit.',
+				recommendation: 'Reject s-values above secp256k1n/2 and enforce v ∈ {27, 28}.',
+				code: 'address signer = ecrecover(digest, v, r, s);'
+			}
+		]
 	});
 
 	setMeta('org_label', 'Oasis Protocol');

@@ -55,6 +55,7 @@ async function main() {
 
 	const review = {
 		commit: 'a3f9c21',
+		model: 'claude-opus-4-8',
 		trigger: 'Scheduled',
 		engine: 'slither+semgrep+llm',
 		durationSecs: Math.round((Date.now() - startedAt) / 1000),
@@ -93,7 +94,11 @@ async function main() {
 	});
 	const out = await res.json();
 	if (!res.ok) throw new Error(`POST review -> ${res.status} ${JSON.stringify(out)}`);
-	console.log('  report submitted:', out);
+	console.log(
+		out.duplicate
+			? `  identical scan already recorded (deduped, 200): ${out.reviewId}`
+			: `  report submitted (201): ${out.reviewId}`
+	);
 
 	await put({ active: false });
 	console.log('✓ scan complete, active run cleared');

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { db } from './db';
 import { fingerprint } from './fingerprint';
+import { canonicalFindings, contentHash } from './content-hash';
 import { sanitizeReportHtml } from './sanitize';
 import {
 	countSeverities,
@@ -12,6 +13,8 @@ import {
 	langColor,
 	sevPills,
 	SEV_LABEL,
+	SEV_RANK,
+	SEVERITIES,
 	statusColor
 } from '$lib/format';
 import type {
@@ -45,6 +48,7 @@ interface ReviewRow {
 	id: string;
 	repo_id: string;
 	commit_hash: string;
+	model: string;
 	trigger: string;
 	engine: string;
 	summary: string;
@@ -56,6 +60,7 @@ interface ReviewRow {
 	new_count: number;
 	resolved_count: number;
 	resolved_json: string;
+	content_hash: string | null;
 	created_at: number;
 }
 
@@ -170,17 +175,83 @@ function countsForReview(reviewId: string): SeverityCounts {
 	return c;
 }
 
-function latestReviewRow(repoId: string): ReviewRow | undefined {
-	return db
-		.prepare('SELECT * FROM reviews WHERE repo_id = ? ORDER BY created_at DESC LIMIT 1')
-		.get(repoId) as ReviewRow | undefined;
+interface UnionFinding {
+	fingerprint: string;
+	severity: Severity;
+	title: string;
+	file: string;
 }
 
-/** Existing review id for a (repo, commit) pair, or null. Drives idempotent submits. */
-export function findReviewByCommit(repoId: string, commit: string): string | null {
+/**
+ * The deduped finding set for a repo's commit, unioned across every scan of that
+ * commit. A commit can be scanned multiple times (non-deterministic re-runs,
+ * different models); a finding any scan flagged is kept, and on a severity
+ * disagreement the most severe rating wins. Deduped by fingerprint so the same
+ * issue seen by two models counts once — hiding a real issue because the latest
+ * model happened to miss it is the wrong failure mode for a security board. This
+ * is the single source for both the headline status and a later commit's diff base.
+ */
+function unionFindingsForCommit(repoId: string, commit: string): UnionFinding[] {
+	const rows = db
+		.prepare(
+			`SELECT f.fingerprint AS fingerprint, f.severity AS severity, f.title AS title, f.file AS file
+			   FROM findings f JOIN reviews r ON f.review_id = r.id
+			  WHERE r.repo_id = ? AND r.commit_hash = ?`
+		)
+		.all(repoId, commit) as { fingerprint: string; severity: Severity; title: string; file: string }[];
+	const byFp = new Map<string, UnionFinding>();
+	for (const row of rows) {
+		if (!VALID_SEV.has(row.severity)) continue;
+		const cur = byFp.get(row.fingerprint);
+		if (!cur) byFp.set(row.fingerprint, { ...row });
+		else if (SEV_RANK[row.severity] < SEV_RANK[cur.severity]) cur.severity = row.severity;
+	}
+	return [...byFp.values()];
+}
+
+/** Severity counts for a repo's current commit, unioned across all its scans. */
+function unionCountsForCommit(repoId: string, commit: string): SeverityCounts {
+	return countSeverities(unionFindingsForCommit(repoId, commit));
+}
+
+/** Newest scan of a specific commit. Drives the repo card's "last scan" labels (so
+ *  they describe the same commit the headline counts come from). rowid DESC breaks
+ *  created_at ties deterministically. */
+function latestReviewRowForCommit(repoId: string, commit: string): ReviewRow | undefined {
+	return db
+		.prepare(
+			'SELECT * FROM reviews WHERE repo_id = ? AND commit_hash = ? ORDER BY created_at DESC, rowid DESC LIMIT 1'
+		)
+		.get(repoId, commit) as ReviewRow | undefined;
+}
+
+/**
+ * The repo's current commit and how many times it has been scanned. "Current" is
+ * the most-recently-*introduced* commit — the one whose first scan is newest — not
+ * simply the newest scan row, so re-scanning an OLDER commit (a different model on
+ * historic code) can't hijack the headline status to a stale code state. `exclude`
+ * drops a commit, used to find the previous head as a first scan's diff base.
+ */
+function repoHead(repoId: string, exclude?: string): { commit: string; scans: number } | null {
+	const tail =
+		`${exclude ? 'AND commit_hash != ? ' : ''}` +
+		'GROUP BY commit_hash ORDER BY MIN(created_at) DESC, MAX(rowid) DESC LIMIT 1';
+	// `commit` is a SQLite keyword — keep the column name and rename in JS.
+	const sql = `SELECT commit_hash, COUNT(*) AS scans FROM reviews WHERE repo_id = ? ${tail}`;
+	const stmt = db.prepare(sql);
+	const row = (exclude ? stmt.get(repoId, exclude) : stmt.get(repoId)) as
+		| { commit_hash: string; scans: number }
+		| undefined;
+	return row ? { commit: row.commit_hash, scans: row.scans } : null;
+}
+
+/** Existing review id whose content matches `hash` (repo-scoped), or null. A scan's
+ *  content hash (commit + model + engine + finding set) is its identity, so this
+ *  drives idempotent resubmits — a delivery retry returns the existing review. */
+export function findReviewByHash(repoId: string, hash: string): string | null {
 	const row = db
-		.prepare('SELECT id FROM reviews WHERE repo_id = ? AND commit_hash = ? LIMIT 1')
-		.get(repoId, commit) as { id: string } | undefined;
+		.prepare('SELECT id FROM reviews WHERE repo_id = ? AND content_hash = ? LIMIT 1')
+		.get(repoId, hash) as { id: string } | undefined;
 	return row?.id ?? null;
 }
 
@@ -189,8 +260,13 @@ export function findReviewByCommit(repoId: string, commit: string): string | nul
 /* ------------------------------------------------------------------ */
 
 function buildRepoSummary(repo: RepoRow, scanRepoId: string | null, now: number): RepoSummary {
-	const latest = latestReviewRow(repo.id);
-	const counts = latest ? countsForReview(latest.id) : emptyCounts();
+	// The card describes the *current code state* = the head commit (the most
+	// recently introduced one). Status counts AND the "last scan" labels both come
+	// from that commit, so re-scanning an older commit — newer activity, but stale
+	// code — changes neither. `head.scan` is the head commit's most recent scan.
+	const head = repoHead(repo.id);
+	const headScan = head ? latestReviewRowForCommit(repo.id, head.commit) : undefined;
+	const counts = head ? unionCountsForCommit(repo.id, head.commit) : emptyCounts();
 	const status: 'flagged' | 'clean' = counts.total > 0 ? 'flagged' : 'clean';
 	return {
 		id: repo.id,
@@ -207,9 +283,11 @@ function buildRepoSummary(repo: RepoRow, scanRepoId: string | null, now: number)
 		clean: status === 'clean',
 		glyph: status === 'clean' ? '[ok]' : '[!!]',
 		scanning: scanRepoId === repo.id,
-		lastRunLabel: latest ? fmtAgo(latest.created_at, now) : 'never',
-		lastDurationLabel: latest ? fmtDur(latest.duration_secs) : '—',
-		filesScanned: latest?.files_scanned ?? 0
+		lastRunLabel: headScan ? fmtAgo(headScan.created_at, now) : 'never',
+		lastDurationLabel: headScan ? fmtDur(headScan.duration_secs) : '—',
+		filesScanned: headScan?.files_scanned ?? 0,
+		headCommit: head?.commit ?? null,
+		headScanCount: head?.scans ?? 0
 	};
 }
 
@@ -225,6 +303,7 @@ function reviewSummary(rv: ReviewRow, now: number): ReviewSummary {
 		id: rv.id,
 		repoId: rv.repo_id,
 		commit: rv.commit_hash,
+		model: rv.model,
 		prevCommit: rv.prev_commit,
 		trigger: rv.trigger,
 		createdAt: rv.created_at,
@@ -297,42 +376,33 @@ export function listReviews(opts: ListReviewsOpts = {}, now = Date.now()): Revie
 /* review detail (with per-finding lifecycle + diff)                   */
 /* ------------------------------------------------------------------ */
 
-/** Index of the first element ≥ `target` in an ascending array (binary search).
- *  `arr.length - lowerBound(arr, t)` is the count of elements ≥ t. */
-function lowerBound(sorted: number[], target: number): number {
-	let lo = 0;
-	let hi = sorted.length;
-	while (lo < hi) {
-		const mid = (lo + hi) >> 1;
-		if (sorted[mid] < target) lo = mid + 1;
-		else hi = mid;
-	}
-	return lo;
-}
+// SQL severity ordering, derived from SEVERITIES so it can't drift from SEV_RANK.
+// SEVERITIES holds only fixed internal keys, so interpolation here is injection-safe.
+const SEV_ORDER_SQL = `CASE severity ${SEVERITIES.map((s, i) => `WHEN '${s}' THEN ${i}`).join(' ')} ELSE ${SEVERITIES.length} END`;
 
 export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetail | null {
 	const rv = db.prepare('SELECT * FROM reviews WHERE id = ?').get(reviewId) as ReviewRow | undefined;
 	if (!rv) return null;
 	const rows = db
-		.prepare(
-			`SELECT * FROM findings WHERE review_id = ?
-			 ORDER BY CASE severity WHEN 'crit' THEN 0 WHEN 'high' THEN 1 WHEN 'med' THEN 2 ELSE 3 END, id`
-		)
+		.prepare(`SELECT * FROM findings WHERE review_id = ? ORDER BY ${SEV_ORDER_SQL}, id`)
 		.all(reviewId) as unknown as FindingRow[];
 
-	// Runs of this repo up to and including this review, oldest first — the schedule
-	// is flexible, so "open N runs" is the actual count of reviews since the finding
-	// first showed up, not an age-÷-cadence estimate. Sorted once here so each
-	// finding's count is a binary search instead of a full scan.
-	const runTimes = (
-		db
-			.prepare('SELECT created_at FROM reviews WHERE repo_id = ? AND created_at <= ? ORDER BY created_at')
-			.all(rv.repo_id, rv.created_at) as { created_at: number }[]
-	).map((r) => r.created_at);
+	// Runs of this repo up to and including this review, oldest first. "Open N runs"
+	// counts the distinct *commits* (code states) a finding has spanned since it was
+	// first seen — not raw scan rows, so re-scanning one commit several times (LLM
+	// re-runs, multiple models) doesn't inflate it.
+	const runRows = db
+		.prepare('SELECT created_at, commit_hash FROM reviews WHERE repo_id = ? AND created_at <= ?')
+		.all(rv.repo_id, rv.created_at) as { created_at: number; commit_hash: string }[];
 
 	const findings: Finding[] = rows.map((f) => {
 		const ageHours = Math.max(0, (rv.created_at - f.first_seen_at) / 3_600_000);
-		const openRuns = Math.max(1, runTimes.length - lowerBound(runTimes, f.first_seen_at));
+		const openRuns = Math.max(
+			1,
+			new Set(
+				runRows.filter((r) => r.created_at >= f.first_seen_at).map((r) => r.commit_hash)
+			).size
+		);
 		return {
 			severity: f.severity,
 			title: f.title,
@@ -393,6 +463,7 @@ export interface FindingInput {
 
 export interface ReviewInput {
 	commit: string;
+	model?: string;
 	trigger?: string;
 	engine?: string;
 	summary?: string;
@@ -416,38 +487,74 @@ function tx<T>(fn: () => T): T {
 	}
 }
 
-export function insertReview(repoId: string, input: ReviewInput): string {
+export function insertReview(
+	repoId: string,
+	input: ReviewInput
+): { id: string; duplicate: boolean } {
 	const repo = getRepoRow(repoId);
 	if (!repo) throw new Error(`unknown repo: ${repoId}`);
 
 	const now = input.createdAt ?? Date.now();
 	const reviewId = randomUUID();
-	const findings = (input.findings ?? []).filter((f) => VALID_SEV.has(f.severity));
+	const model = input.model ?? '';
+	const engine = input.engine ?? 'slither+semgrep+llm';
+	// Reduce to the canonical finding set used for BOTH storage and identity: drop
+	// unknown severities, then collapse same-fingerprint findings to the most severe
+	// (otherwise the same issue emitted twice would inflate new_count and the per-
+	// review totals while the deduped union counts it once). contentHash() applies the
+	// identical reduction, so the rows we store match the hash we dedup on — and a
+	// migration backfill of a legacy row lands on the hash a faithful resubmit yields.
+	const findings = canonicalFindings(input.findings ?? []);
 
-	// Previous review (latest existing for this repo) drives the diff.
-	const prev = latestReviewRow(repoId);
-	const prevFindings = prev
-		? (db
-				.prepare('SELECT severity, title, file, fingerprint FROM findings WHERE review_id = ?')
-				.all(prev.id) as Pick<FindingRow, 'severity' | 'title' | 'file' | 'fingerprint'>[])
-		: [];
-	const prevFps = new Set(prevFindings.map((f) => f.fingerprint));
+	// Idempotent on scan content, not (repo, commit): a commit can be scanned many
+	// times. A resubmit with the same content (commit + model + engine + finding set)
+	// is an at-least-once delivery retry — return the existing review unchanged.
+	const hash = contentHash({
+		commit: input.commit,
+		model,
+		engine,
+		findings: findings.map((f) => ({ severity: f.severity, file: f.file, title: f.title }))
+	});
+	const dup = findReviewByHash(repoId, hash);
+	if (dup) return { id: dup, duplicate: true };
 
+	// `is_new` means "the first time this fingerprint has ever been seen in this repo",
+	// NOT "new since the previous commit". This is independent of whether the scan is a
+	// re-scan: a second model that uniquely surfaces an issue genuinely discovered it,
+	// so it counts as new — while a re-scan that merely re-reports known findings adds
+	// nothing. It is keyed on the EXISTENCE of an earlier finding row (seen.m === null),
+	// not on a timestamp equality, so two sibling scans landing in the same millisecond
+	// don't both claim the discovery. Because a fingerprint is new on exactly one row,
+	// getTrends can sum new_count over every row without double-counting. firstSeen is
+	// clamped with the earliest known time so a finding's stored first_seen_at never
+	// post-dates its own review.
 	const prepared = findings.map((f) => {
 		const file = f.file ?? '';
 		const fp = fingerprint(file, f.title);
 		const seen = db
 			.prepare('SELECT MIN(first_seen_at) AS m FROM findings WHERE repo_id = ? AND fingerprint = ?')
 			.get(repoId, fp) as { m: number | null };
-		const firstSeen = seen.m ?? now;
-		return { f, file, fp, isNew: !prevFps.has(fp), firstSeen };
+		const firstSeen = seen.m === null ? now : Math.min(seen.m, now);
+		return { f, file, fp, isNew: seen.m === null, firstSeen };
 	});
-
-	const curFps = new Set(prepared.map((p) => p.fp));
-	const resolved: ResolvedFinding[] = prevFindings
-		.filter((f) => !curFps.has(f.fingerprint))
-		.map((f) => ({ severity: f.severity, title: f.title, file: f.file }));
 	const newCount = prepared.filter((p) => p.isNew).length;
+
+	// `resolved` is a code-state transition, so only a commit's FIRST scan computes it,
+	// against the union of the PREVIOUS head commit (the code state immediately before
+	// this one). Re-scans of a commit carry no resolved delta — dropping a finding a
+	// sibling scan flagged isn't a fix, and the union keeps it. Using the previous
+	// commit's union (not a single prior scan) makes the delta independent of which
+	// model's scan happened to run last, matching the headline status.
+	const isFirstScanOfCommit = !db
+		.prepare('SELECT 1 FROM reviews WHERE repo_id = ? AND commit_hash = ? LIMIT 1')
+		.get(repoId, input.commit);
+	const prevCommit = isFirstScanOfCommit ? (repoHead(repoId, input.commit)?.commit ?? null) : null;
+	const curFps = new Set(prepared.map((p) => p.fp));
+	const resolved: ResolvedFinding[] = prevCommit
+		? unionFindingsForCommit(repoId, prevCommit)
+				.filter((f) => !curFps.has(f.fingerprint))
+				.map((f) => ({ severity: f.severity, title: f.title, file: f.file }))
+		: [];
 
 	const lines = input.lines ?? repo.lines;
 	const html = input.html ? sanitizeReportHtml(input.html) : null;
@@ -455,24 +562,26 @@ export function insertReview(repoId: string, input: ReviewInput): string {
 	tx(() => {
 		db.prepare(
 			`INSERT INTO reviews
-			 (id, repo_id, commit_hash, trigger, engine, summary, html, duration_secs, lines,
-			  files_scanned, prev_commit, new_count, resolved_count, resolved_json, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			 (id, repo_id, commit_hash, model, trigger, engine, summary, html, duration_secs, lines,
+			  files_scanned, prev_commit, new_count, resolved_count, resolved_json, content_hash, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		).run(
 			reviewId,
 			repoId,
 			input.commit,
+			model,
 			input.trigger ?? 'Scheduled',
-			input.engine ?? 'slither+semgrep+llm',
+			engine,
 			input.summary ?? '',
 			html,
 			input.durationSecs ?? 0,
 			lines,
 			input.filesScanned ?? 0,
-			prev?.commit_hash ?? null,
+			prevCommit,
 			newCount,
 			resolved.length,
 			JSON.stringify(resolved),
+			hash,
 			now
 		);
 
@@ -501,7 +610,7 @@ export function insertReview(repoId: string, input: ReviewInput): string {
 		}
 	});
 
-	return reviewId;
+	return { id: reviewId, duplicate: false };
 }
 
 /* ------------------------------------------------------------------ */
@@ -589,6 +698,11 @@ export function getTrends(days = 14, opts: { repoId?: string } = {}, now = Date.
 		where.push('repo_id = ?');
 		params.push(opts.repoId);
 	}
+	// Sum every row's stored delta. new_count counts findings seen for the first time
+	// in the repo, so each fingerprint contributes new exactly once across all its
+	// scans; resolved_count is non-zero only on a commit's first scan (see insertReview).
+	// So neither side double-counts when a commit is scanned several times. `reviews`
+	// counts every scan that ran, including re-scans.
 	const rows = db
 		.prepare(`SELECT created_at, new_count, resolved_count FROM reviews WHERE ${where.join(' AND ')}`)
 		.all(...params) as unknown as {
