@@ -31,10 +31,14 @@ export function contentHash(s: ScanIdentity): string {
 	const keys = s.findings
 		.map((f) => `${f.severity}:${fingerprint(f.file ?? '', f.title)}`)
 		.sort();
-	// Encode as a structured JSON tuple rather than a delimiter-joined string: a
-	// raw separator (e.g. '\n') could appear inside an agent-controlled model/engine
-	// value and let two distinct scans collide. JSON escaping makes field boundaries
+	// Normalize commit/model/engine here so identity is the single source of truth:
+	// the live POST path trims these, but a content_hash backfilled from a legacy
+	// row reads the stored value verbatim (older writers didn't trim). Trimming at
+	// the hash makes a post-upgrade retry of such a row dedup instead of inserting a
+	// twin. Encode as a structured JSON tuple rather than a delimiter-joined string:
+	// a raw separator (e.g. '\n') could appear inside an agent-controlled value and
+	// let two distinct scans collide; JSON escaping keeps field boundaries
 	// unambiguous regardless of field contents.
-	const canonical = JSON.stringify([s.commit, s.model, s.engine, keys]);
+	const canonical = JSON.stringify([s.commit.trim(), s.model.trim(), s.engine.trim(), keys]);
 	return createHash('sha256').update(canonical).digest('hex');
 }

@@ -25,7 +25,8 @@ export const GET: RequestHandler = ({ params }) => {
  * models), so submits are idempotent on scan *content* — commit + model + engine +
  * finding set — not on (repo, commit): a byte-equivalent resubmit returns the
  * existing review, anything else is a new one. The diff (new / carried / resolved)
- * is computed against the repo's latest scan on a *different* commit.
+ * is a property of the commit: only a commit's first scan carries a delta (against
+ * the previous commit's union of findings); re-scans of the same commit report none.
  */
 export const POST: RequestHandler = async ({ params, request }) => {
 	const denied = checkWriteAuth(request);

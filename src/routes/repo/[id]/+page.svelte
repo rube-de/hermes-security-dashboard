@@ -107,6 +107,13 @@
 		</div>
 	</div>
 
+	{#if repo.headScanCount > 1}
+		<p class="union-note mono">
+			Status above unions {repo.headScanCount} scans of <span class="commit">{repo.headCommit}</span> —
+			a finding any scan flags is counted, so the headline can exceed an individual run below.
+		</p>
+	{/if}
+
 	<section class="history">
 		<div class="hist-head">
 			<h2 class="display">Review history</h2>
@@ -315,6 +322,15 @@
 		color: var(--text);
 	}
 
+	.union-note {
+		margin: 18px 0 0;
+		font-size: 12px;
+		color: var(--dim);
+		line-height: 1.5;
+	}
+	.union-note .commit {
+		color: var(--accent2);
+	}
 	.history {
 		margin-top: 26px;
 	}

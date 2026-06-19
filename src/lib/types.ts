@@ -68,7 +68,7 @@ export interface ReviewDetail extends ReviewSummary {
 	hasPrev: boolean;
 }
 
-/** Repository row with its current (latest-review) status. */
+/** Repository row with its current-commit status. */
 export interface RepoSummary {
 	id: string;
 	lang: string;
@@ -77,6 +77,7 @@ export interface RepoSummary {
 	branch: string;
 	lines: number;
 	langColor: string;
+	/** Status counts: the union of findings across all scans of the current commit. */
 	counts: SeverityCounts;
 	status: 'flagged' | 'clean';
 	statusLabel: string;
@@ -86,6 +87,10 @@ export interface RepoSummary {
 	lastRunLabel: string;
 	lastDurationLabel: string;
 	filesScanned: number;
+	/** The repo's current commit (most recently introduced), or null if never scanned. */
+	headCommit: string | null;
+	/** How many scans the current commit has — `counts` unions all of them. */
+	headScanCount: number;
 }
 
 export interface RepoDetail extends RepoSummary {

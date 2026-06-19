@@ -222,9 +222,10 @@ paths:
         finding's line/description/recommendation/code are not part of the key). A
         resubmit with the same key returns the existing review with `duplicate: true`
         and HTTP 200; a different finding set, severity, or model creates a new
-        review. The new/carried/resolved diff is computed automatically against the
-        repo's latest scan on a *different* commit. The repository must be registered
-        first.
+        review. The new/carried/resolved diff is a property of the *commit*: only a
+        commit's first scan carries a delta (computed against the union of findings on
+        the previous commit), and re-scans of the same commit report a zero delta so a
+        re-run can't fabricate churn. The repository must be registered first.
       security:
         - bearerAuth: []
       parameters:
@@ -469,10 +470,13 @@ components:
 
     RepoSummary:
       type: object
-      description: Repository with status derived from its latest review.
+      description: >-
+        Repository with status derived from its current commit (the most recently
+        introduced one), unioned across all of that commit's scans.
       required:
         [id, lang, description, path, branch, lines, langColor, counts, status,
-         statusLabel, clean, glyph, scanning, lastRunLabel, lastDurationLabel, filesScanned]
+         statusLabel, clean, glyph, scanning, lastRunLabel, lastDurationLabel, filesScanned,
+         headCommit, headScanCount]
       properties:
         id: { type: string }
         lang: { type: string }
@@ -481,7 +485,10 @@ components:
         branch: { type: string }
         lines: { type: integer }
         langColor: { type: string, description: Hex colour for the language }
-        counts: { $ref: '#/components/schemas/SeverityCounts' }
+        counts:
+          allOf:
+            - $ref: '#/components/schemas/SeverityCounts'
+          description: Union of findings across every scan of the current commit.
         status: { type: string, enum: [flagged, clean] }
         statusLabel: { type: string }
         clean: { type: boolean }
@@ -490,6 +497,12 @@ components:
         lastRunLabel: { type: string }
         lastDurationLabel: { type: string }
         filesScanned: { type: integer }
+        headCommit:
+          type: [string, 'null']
+          description: Current commit (most recently introduced), or null if never scanned.
+        headScanCount:
+          type: integer
+          description: How many scans the current commit has; `counts` unions all of them.
 
     RepoDetail:
       allOf:

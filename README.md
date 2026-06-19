@@ -215,8 +215,9 @@ curl -X POST localhost:3000/api/repos -H 'content-type: application/json' -d '{
 `findings` is the structured form the dashboard renders into the report layout.
 `html` is **optional** — a pre-rendered report body that is sanitized
 server-side and shown below the structured findings. The diff (new / carried /
-resolved) is computed automatically against the repo's latest scan on a
-*different* commit (so re-scanning one commit doesn't fabricate churn).
+resolved) is a property of the commit: only a commit's first scan carries a delta
+(computed against the previous commit's unioned findings), and re-scans of the same
+commit report a zero delta — so re-scanning one commit never fabricates churn.
 
 ```sh
 curl -X POST localhost:3000/api/repos/sapphire-paratime/reviews \

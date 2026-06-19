@@ -2,6 +2,13 @@ import type { Severity, SeverityCounts } from './types';
 
 export const SEVERITIES: Severity[] = ['crit', 'high', 'med', 'low'];
 
+/** Numeric rank per severity (0 = most severe), derived from SEVERITIES so the
+ *  ordering has a single source of truth (used to pick the worst severity when
+ *  unioning a commit's scans, and to build the SQL ordering). */
+export const SEV_RANK: Record<Severity, number> = Object.fromEntries(
+	SEVERITIES.map((s, i) => [s, i])
+) as Record<Severity, number>;
+
 export const SEV_LABEL: Record<Severity, string> = {
 	crit: 'Critical',
 	high: 'High',
