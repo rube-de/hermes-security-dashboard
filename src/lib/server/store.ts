@@ -171,6 +171,12 @@ function allRepoRows(): RepoRow[] {
 	return db.prepare('SELECT * FROM repos ORDER BY created_at ASC').all() as unknown as RepoRow[];
 }
 
+/** Cheap existence check for endpoints that only need to 404 on an unknown repo —
+ *  avoids the full summary build (head union + all review rows) getRepoDetail does. */
+export function repoExists(id: string): boolean {
+	return !!db.prepare('SELECT 1 FROM repos WHERE id = ? LIMIT 1').get(id);
+}
+
 /* ------------------------------------------------------------------ */
 /* counts / latest review                                              */
 /* ------------------------------------------------------------------ */

@@ -212,8 +212,9 @@ paths:
               required: [status]
               properties:
                 status:
-                  type: string
-                  enum: [open, acknowledged, false_positive, accepted_risk]
+                  type: [string, 'null']
+                  enum: [open, acknowledged, false_positive, accepted_risk, null]
+                  description: A verdict to set; `open` or `null` clears the verdict.
                 note: { type: string, description: Free-text justification }
       responses:
         '200':

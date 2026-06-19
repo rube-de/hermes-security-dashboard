@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { getRepoDetail, setTriage, clearTriage } from '$lib/server/store';
+import { repoExists, setTriage, clearTriage } from '$lib/server/store';
 import type { TriageStatus } from '$lib/types';
 import type { RequestHandler } from './$types';
 
@@ -16,7 +16,7 @@ const VALID = new Set<TriageStatus>(['acknowledged', 'false_positive', 'accepted
  * anonymous-but-timestamped (see store.setTriage).
  */
 export const PUT: RequestHandler = async ({ params, request }) => {
-	if (!getRepoDetail(params.id)) {
+	if (!repoExists(params.id)) {
 		return json({ error: `repository "${params.id}" not found` }, { status: 404 });
 	}
 
