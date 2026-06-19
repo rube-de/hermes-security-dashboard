@@ -485,6 +485,58 @@ export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetai
 }
 
 /* ------------------------------------------------------------------ */
+/* finding triage (human verdicts; survive agent re-runs)              */
+/* ------------------------------------------------------------------ */
+
+/** Latest stored title/file for a finding identity, or null if no finding in the repo
+ *  carries this fingerprint. The authoritative source for the tag-time snapshot. */
+function findingIdentity(repoId: string, fp: string): { title: string; file: string } | null {
+	const row = db
+		.prepare(
+			'SELECT title, file FROM findings WHERE repo_id = ? AND fingerprint = ? ORDER BY first_seen_at DESC, id DESC LIMIT 1'
+		)
+		.get(repoId, fp) as { title: string; file: string } | undefined;
+	return row ?? null;
+}
+
+/**
+ * Upsert a human triage verdict for a finding identity. Last-write-wins on the single
+ * (repo_id, fingerprint) row; created_at is preserved across updates, updated_at moves.
+ * Returns false WITHOUT writing if no finding in the repo carries this fingerprint, so the
+ * caller can 404 rather than store an orphan tag. The fp_title/fp_file snapshot is taken
+ * from the finding itself, not the caller, so it can't be spoofed.
+ */
+export function setTriage(
+	repoId: string,
+	fp: string,
+	status: TriageStatus,
+	note = '',
+	at = Date.now()
+): boolean {
+	const ident = findingIdentity(repoId, fp);
+	if (!ident) return false;
+	db.prepare(
+		`INSERT INTO finding_triage
+		 (repo_id, fingerprint, status, note, fp_title, fp_file, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(repo_id, fingerprint) DO UPDATE SET
+		   status = excluded.status,
+		   note = excluded.note,
+		   updated_at = excluded.updated_at`
+	).run(repoId, fp, status, note, ident.title, ident.file, at, at);
+	return true;
+}
+
+/** Clear a finding's triage verdict (back to open/untriaged). Idempotent; returns whether
+ *  a row was actually removed. */
+export function clearTriage(repoId: string, fp: string): boolean {
+	const r = db
+		.prepare('DELETE FROM finding_triage WHERE repo_id = ? AND fingerprint = ?')
+		.run(repoId, fp);
+	return r.changes > 0;
+}
+
+/* ------------------------------------------------------------------ */
 /* insert review (agent submission + seed)                             */
 /* ------------------------------------------------------------------ */
 

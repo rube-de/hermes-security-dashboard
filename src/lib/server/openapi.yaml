@@ -190,6 +190,59 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/repos/{id}/findings/{fingerprint}/triage:
+    put:
+      tags: [Repositories]
+      operationId: setFindingTriage
+      summary: Set or clear a human triage verdict on a finding
+      description: |
+        Open endpoint (no auth) — a dashboard user affordance, not an agent data write.
+        Keyed on the finding's stable fingerprint so the verdict persists across agent
+        re-runs. `status: open` (or null) clears the verdict. Setting a verdict 404s if
+        no finding in the repo currently carries the fingerprint; clearing is idempotent.
+      parameters:
+        - $ref: '#/components/parameters/RepoId'
+        - $ref: '#/components/parameters/Fingerprint'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [open, acknowledged, false_positive, accepted_risk]
+                note: { type: string, description: Free-text justification }
+      responses:
+        '200':
+          description: Verdict set or cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, status]
+                properties:
+                  ok: { const: true }
+                  status:
+                    type: string
+                    enum: [open, acknowledged, false_positive, accepted_risk]
+                  note: { type: string }
+                  cleared:
+                    type: boolean
+                    description: Present on a clear; whether a row was actually removed
+        '400':
+          description: Invalid JSON body or status value
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Repository, or finding with that fingerprint, not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/repos/{id}/reviews:
     get:
       tags: [Reviews]
@@ -424,6 +477,12 @@ components:
       required: true
       schema: { type: string }
       description: Repository id (e.g. `sapphire-paratime`)
+    Fingerprint:
+      name: fingerprint
+      in: path
+      required: true
+      schema: { type: string }
+      description: Stable finding identity — the `fingerprint` field of a Finding
 
   responses:
     Unauthorized:
