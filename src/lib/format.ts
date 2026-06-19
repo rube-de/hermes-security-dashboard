@@ -1,4 +1,4 @@
-import type { Severity, SeverityCounts } from './types';
+import type { Severity, SeverityCounts, TriageStatus } from './types';
 
 export const SEVERITIES: Severity[] = ['crit', 'high', 'med', 'low'];
 
@@ -37,6 +37,15 @@ export const SEV_BG_VAR: Record<Severity, string> = {
 	high: 'var(--highB)',
 	med: 'var(--medB)',
 	low: 'var(--lowB)'
+};
+
+/** Triage statuses in display order (drives the verdict buttons). */
+export const TRIAGE_STATUSES: TriageStatus[] = ['acknowledged', 'false_positive', 'accepted_risk'];
+
+export const TRIAGE_LABEL: Record<TriageStatus, string> = {
+	acknowledged: 'Acknowledged',
+	false_positive: 'False positive',
+	accepted_risk: 'Accepted risk'
 };
 
 export const LANG_COLOR: Record<string, string> = {
