@@ -19,6 +19,15 @@
 	let busy = $state(false);
 	let err = $state('');
 	let note = $state('');
+	let triggerEl: HTMLButtonElement | undefined = $state();
+
+	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape' && open) {
+			e.preventDefault();
+			open = false;
+			triggerEl?.focus();
+		}
+	}
 
 	function toggle() {
 		if (!open) {
@@ -65,17 +74,30 @@
 	}
 </script>
 
+<svelte:window onkeydown={handleKeydown} />
+
 <div class="triage">
-	<button class="trigger mono" class:active={open} onclick={toggle}>
-		{current ? 'Edit triage' : 'Triage'} ▾
+	<button
+		bind:this={triggerEl}
+		class="trigger mono"
+		class:active={open}
+		aria-expanded={open}
+		aria-haspopup="true"
+		aria-controls="triage-panel-{fingerprint}"
+		onclick={toggle}
+	>
+		{current ? 'Edit triage' : 'Triage'} <span aria-hidden="true">▾</span>
 	</button>
 
 	{#if open}
-		<div class="panel">
+		<div class="panel" id="triage-panel-{fingerprint}">
+			<label for="triage-note-{fingerprint}" class="visually-hidden">Triage justification note</label>
 			<textarea
+				id="triage-note-{fingerprint}"
 				class="note"
 				bind:value={note}
 				rows="2"
+				aria-label="Triage justification note"
 				placeholder="Justification (recommended for dismissals)"
 			></textarea>
 			<div class="actions">
@@ -83,6 +105,7 @@
 					<button
 						class="set {s}"
 						class:active={current?.status === s}
+						aria-pressed={current?.status === s}
 						disabled={busy}
 						onclick={() => apply(s)}
 					>
@@ -93,7 +116,7 @@
 					<button class="clear" disabled={busy} onclick={() => apply('open')}>Clear</button>
 				{/if}
 			</div>
-			{#if err}<div class="err mono">{err}</div>{/if}
+			{#if err}<div class="err mono" role="alert">{err}</div>{/if}
 		</div>
 	{/if}
 </div>
@@ -144,7 +167,8 @@
 		font-family: inherit;
 	}
 	.note:focus {
-		outline: none;
+		outline: 2px solid var(--accent);
+		outline-offset: 1px;
 		border-color: var(--accent);
 	}
 	.actions {

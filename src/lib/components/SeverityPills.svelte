@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { sevPills } from '$lib/format';
+	import { sevPills, SEV_LABEL } from '$lib/format';
 	import type { SeverityCounts } from '$lib/types';
 
 	let {
@@ -13,11 +13,15 @@
 
 <div class="pills">
 	{#each pills as p (p.key)}
-		<span class="pill" style="--c:{p.color};--b:{p.bg}">{p.text}</span>
+		<span
+			class="pill"
+			style="--c:{p.color};--b:{p.bg}"
+			aria-label="{counts[p.key]} {SEV_LABEL[p.key].toLowerCase()}"
+		>{p.text}</span>
 	{/each}
 	{#if counts.total === 0 && cleanLabel}
 		<span class="clean">
-			{#if cleanDot}<span class="cdot"></span>{/if}{cleanLabel}
+			{#if cleanDot}<span class="cdot" aria-hidden="true"></span>{/if}{cleanLabel}
 		</span>
 	{/if}
 </div>

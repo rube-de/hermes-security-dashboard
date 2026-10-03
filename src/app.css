@@ -16,7 +16,7 @@
 	--grid: rgba(255, 255, 255, 0.05);
 	--text: #e9eef3;
 	--dim: #9ba7b4;
-	--faint: #5c6775;
+	--faint: #7e8b9b;
 	--crit: #ff5d73;
 	--critB: rgba(255, 93, 115, 0.14);
 	--high: #ff9d45;
@@ -42,17 +42,17 @@
 	--grid: rgba(12, 22, 33, 0.05);
 	--text: #0e1620;
 	--dim: #586573;
-	--faint: #8995a2;
-	--crit: #d92d4e;
-	--critB: rgba(217, 45, 78, 0.09);
-	--high: #c0680a;
-	--highB: rgba(192, 104, 10, 0.1);
-	--med: #937000;
-	--medB: rgba(147, 112, 0, 0.11);
+	--faint: #5f6b78;
+	--crit: #c0223f;
+	--critB: rgba(192, 34, 63, 0.09);
+	--high: #a85600;
+	--highB: rgba(168, 86, 0, 0.1);
+	--med: #7d5f00;
+	--medB: rgba(125, 95, 0, 0.11);
 	--low: #2e63d6;
 	--lowB: rgba(46, 99, 214, 0.09);
-	--accent: #0b8e76;
-	--accentB: rgba(11, 142, 118, 0.1);
+	--accent: #08735f;
+	--accentB: rgba(8, 115, 95, 0.1);
 	--accent2: #2e63d6;
 	--shadow: rgba(12, 22, 33, 0.12);
 }
@@ -93,6 +93,23 @@ button {
 
 input {
 	font-family: inherit;
+}
+
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
+.visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
 }
 
 ::selection {
