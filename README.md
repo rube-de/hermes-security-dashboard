@@ -157,7 +157,7 @@ Point the sync sidecar at the snapshot file (default `${HERMES_DB}.snapshot`),
 | Route                          | What                                                        |
 | ------------------------------ | ---------------------------------------------------------- |
 | `/`                            | Overview — totals by severity, run strip, trend, repo list with search + status/severity filters |
-| `/repo/[id]`                   | Repo detail — metric summary, live scan banner, review history |
+| `/repo/[id]`                   | Repo detail — metric summary, live scan banner, commit-grouped review history with union-based new/fixed changes |
 | `/repo/[id]/review/[reviewId]` | Review report — severity band, summary, diff vs previous run, findings with code + remediation, resolved section |
 
 UI pages read directly from the database via server `load`. The active-run
@@ -213,7 +213,7 @@ curl -X POST http://hermes-security-dashboard:3000/security/api/repos/:id/review
 | GET    | `/api/overview`              | Aggregate metrics + repo summaries     |
 | GET    | `/api/repos`                 | List repositories                      |
 | POST   | `/api/repos`                 | Register / update a repository         |
-| GET    | `/api/repos/:id`             | Repo detail + review history           |
+| GET    | `/api/repos/:id`             | Repo detail + commit groups and flat reviews |
 | GET    | `/api/repos/:id/reviews`     | Reviews for a repo                     |
 | POST   | `/api/repos/:id/reviews`     | **Submit a review report**             |
 | GET    | `/api/repos/:id/rerun`       | Check re-run request state (not consumed) |
@@ -246,10 +246,21 @@ non-negative integer.
 
 `findings` is the structured form the dashboard renders into the report layout.
 `html` is **optional** — a pre-rendered report body that is sanitized
-server-side and shown below the structured findings. The diff (new / carried /
-resolved) is a property of the commit: only a commit's first scan carries a delta
-(computed against the previous commit's unioned findings), and re-scans of the same
-commit report a zero delta — so re-scanning one commit never fabricates churn.
+server-side and shown below the structured findings. Stored scan-level `newCount`
+counts issues first seen in the repository, so a re-scan can discover new issues.
+Stored `resolvedCount` is calculated only for a commit's first scan against the
+previous commit's union. These scan snapshots also feed the daily trend aggregates;
+they are not the commit-history delta.
+
+`GET /api/repos/:id` exposes `commits`, newest introduced commit first, alongside
+the flat `reviews` list. Each commit's `counts` unions every scan's issues, takes
+the worst severity for each identity, and excludes findings quieted by triage,
+just like the overview. Its `newCount` and `fixedCount` compare that union with the
+immediately preceding commit's union: an issue absent before is new, one absent
+now is fixed. The oldest commit has no comparison (both zero); an issue returning
+after a gap is new again. Later scans update the commit's union and its adjacent
+transitions without adding a commit or moving it to the top of history. Deltas
+display only non-zero parts, such as `+2 new · 2 fixed`.
 
 ```sh
 curl -X POST localhost:3000/api/repos/sapphire-paratime/reviews \
@@ -307,10 +318,15 @@ resubmit with the same key returns the existing review (`duplicate: true`, HTTP 
 a re-run that finds a different issue, drops one, changes a severity, or runs a
 different `model` is stored as its own review. Note the key ignores a finding's
 `line`/`description`/`recommendation`/`code`, so a retry that only rewords those (or
-moves a line) dedups to the first report. Each scan shows up as its own row, newest
-first, with its `model`. A repo's headline status unions the issues across **all**
-scans of its current commit, so an issue one model flagged isn't hidden because a
-later model missed it.
+moves a line) dedups to the first report. Review history has one row per commit:
+a single scan links directly to its report; multiple scans expand to individual
+reports, newest scan first. A scan's `uniqueCount` counts issues it found that no
+other model found on that commit, shown as `N unique to <model>` rather than a
+scan delta. Multiple scans of the same model share that model's identity; scans
+with an unreported model (`''`) share the unreported-model bucket. Both scan
+counts and uniqueness exclude quieted issues. A repo's headline status unions
+the issues across **all** scans of its current commit, so an issue one model
+flagged isn't hidden because a later model missed it.
 
 `nextRunAt` (epoch-ms or ISO-8601; 10-digit epoch seconds are rejected with 400)
 tells the dashboard when the agent plans to run next; it's rendered as **Next

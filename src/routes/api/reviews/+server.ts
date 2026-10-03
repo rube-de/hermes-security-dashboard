@@ -9,8 +9,9 @@ import type { RequestHandler } from './$types';
  *
  *   GET /api/reviews?repo=<id>&since=<ms|ISO>&until=<ms|ISO>&limit=<n>
  *
- * Each item is a review summary including severity counts and new/resolved
- * deltas. `limit` is clamped to 1..1000 (default 200).
+ * Each item is a scan summary with severity counts and stored discovery/resolution
+ * snapshots, not a commit-to-commit delta. GET /api/repos/:id exposes that transition
+ * in its unioned commits groups. `limit` is clamped to 1..1000 (default 200).
  */
 export const GET: RequestHandler = ({ url }) => {
 	const since = readTime(url, 'since');

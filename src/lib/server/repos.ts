@@ -1,6 +1,11 @@
 import { db } from './db';
 import { type RepoRow, type ReviewRow } from './rows';
-import { repoHead, latestReviewRowForCommit, unionFindingsForCommit } from './commits';
+import {
+	repoHead,
+	latestReviewRowForCommit,
+	unionFindingsForCommit,
+	commitHistoryForRepo
+} from './commits';
 import { reviewSummary } from './reviews';
 import { triageMapForRepo } from './triage';
 import { getScan } from './scan';
@@ -99,7 +104,11 @@ export function getRepoDetail(id: string): RepoDetail | null {
 	const scan = getScan();
 	const summary = buildRepoSummary(repo, scan.active ? scan.repoId : null);
 	const reviewRows = db
-		.prepare('SELECT * FROM reviews WHERE repo_id = ? ORDER BY created_at DESC')
+		.prepare('SELECT * FROM reviews WHERE repo_id = ? ORDER BY created_at DESC, rowid DESC')
 		.all(id) as unknown as ReviewRow[];
-	return { ...summary, reviews: reviewRows.map((rv) => reviewSummary(rv)) };
+	return {
+		...summary,
+		reviews: reviewRows.map((rv) => reviewSummary(rv)),
+		commits: commitHistoryForRepo(id, reviewRows)
+	};
 }
