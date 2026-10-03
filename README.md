@@ -205,6 +205,8 @@ curl -X POST http://hermes-security-dashboard:3000/security/api/repos/:id/review
 | GET    | `/api/repos/:id`             | Repo detail + review history           |
 | GET    | `/api/repos/:id/reviews`     | Reviews for a repo                     |
 | POST   | `/api/repos/:id/reviews`     | **Submit a review report**             |
+| GET    | `/api/repos/:id/rerun`       | Check re-run request state (not consumed) |
+| POST   | `/api/repos/:id/rerun`       | Record re-run request (not consumed)   |
 | GET    | `/api/reviews`               | List reviews across repos (trend source) |
 | GET    | `/api/reviews/:id`           | Single review (findings + diff)        |
 | GET    | `/api/trends`                | Daily new/resolved/review aggregates   |
@@ -312,6 +314,11 @@ curl -X PUT localhost:3000/api/scan -H 'content-type: application/json' -d '{
 # clear when finished
 curl -X PUT localhost:3000/api/scan -H 'content-type: application/json' -d '{ "active": false }'
 ```
+
+
+### Re-run requests
+
+The endpoints `GET /api/repos/:id/rerun` and `POST /api/repos/:id/rerun` record and inspect re-run requests. Note that requests are never cleared and are currently not consumed by the agent.
 
 ## Data model
 

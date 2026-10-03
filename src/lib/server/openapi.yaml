@@ -142,6 +142,8 @@ paths:
       tags: [Repositories]
       operationId: getRerun
       summary: Whether a re-run is pending for this repo
+      description: |
+        Note: Requests are never cleared and currently not consumed by the agent.
       parameters:
         - $ref: '#/components/parameters/RepoId'
       responses:
@@ -168,8 +170,8 @@ paths:
       operationId: requestRerun
       summary: Request a re-review on the next Hermes cycle
       description: |
-        Open endpoint (no auth) — it records a user request from the UI; the agent
-        polls it and clears it when it next runs.
+        Open endpoint (no auth) — it records a re-run request for this repository.
+        Note: Requests are never cleared and currently not consumed by the agent.
       parameters:
         - $ref: '#/components/parameters/RepoId'
       responses:
