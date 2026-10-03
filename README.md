@@ -147,7 +147,7 @@ Point the sync sidecar at the snapshot file (default `${HERMES_DB}.snapshot`),
 | `HERMES_DB` | `hermes.db` (`/data/hermes.db` in Docker) | Live SQLite path |
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | adapter-node bind |
 | `HERMES_API_TOKEN` | _unset_ | Bearer auth for writes; unset = open (loud startup warning in production) |
-| `HERMES_SEED_DEMO` | `true` | Seed demo data on an empty DB; set `false` in production to start empty |
+| `HERMES_SEED_DEMO` | `false` (prod) / `true` (dev) | Seed demo data on an empty DB; in dev on by default, set `true` in production to seed |
 | `HERMES_DB_SNAPSHOT` | `${HERMES_DB}.snapshot` | Snapshot file the sync layer copies |
 | `HERMES_SNAPSHOT_INTERVAL` | `300` | Seconds between snapshot/checkpoint cycles |
 | `BASE_PATH` | `''` | Sub-path prefix — **build arg**, baked at build time |

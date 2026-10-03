@@ -26,8 +26,8 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       HERMES_DB: /data/hermes.db
-      # Start empty so the agent's real findings populate the dashboard. Set true
-      # to boot with demo data instead.
+      # Starts empty by default in production so the agent's real findings populate
+      # the dashboard. Set true (or HERMES_SEED_DEMO=true) to boot with demo data instead.
       HERMES_SEED_DEMO: ${HERMES_SEED_DEMO:-false}
       # Require a Bearer token on writes. Strongly recommended — without it the
       # push API is open (the app logs a loud warning on startup).
