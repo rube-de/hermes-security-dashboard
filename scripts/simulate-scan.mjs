@@ -61,6 +61,7 @@ async function main() {
 		durationSecs: Math.round((Date.now() - startedAt) / 1000),
 		lines: 19200,
 		filesScanned: 80,
+		agentVersion: 'hermes-agent 1.4.2',
 		// What the real agent knows from its own (flexible) schedule.
 		nextRunAt: Date.now() + 6 * 3600 * 1000,
 		findings: [
@@ -69,6 +70,8 @@ async function main() {
 				title: 'Reentrancy in withdraw() via external call before state update',
 				file: 'contracts/ConfidentialVault.sol',
 				line: 142,
+				ruleId: 'reentrancy-eth',
+				locationKey: 'ConfidentialVault.withdraw',
 				cwe: 'CWE-841',
 				description: 'Balance state is updated after an external call to a user-controlled address.',
 				code: '(bool ok,) = msg.sender.call{value: amt}("");\nbal[msg.sender] -= amt;',
@@ -79,6 +82,8 @@ async function main() {
 				title: 'Missing access control on setOracle()',
 				file: 'contracts/PriceOracle.sol',
 				line: 88,
+				// LLM-only finding: no tool raised it, so no ruleId.
+				locationKey: 'PriceOracle.setOracle',
 				cwe: 'CWE-284',
 				description: 'Any account can repoint the price feed.',
 				code: 'function setOracle(address o) external { oracle = o; }',

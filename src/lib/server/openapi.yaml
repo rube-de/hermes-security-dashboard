@@ -628,9 +628,14 @@ components:
       allOf:
         - $ref: '#/components/schemas/ReviewSummary'
         - type: object
-          required: [engine, summary, lines, filesScanned, findings, quietedCount, resolved, diff, hasPrev]
+          required:
+            [engine, agentVersion, summary, lines, filesScanned, findings, quietedCount, resolved,
+             diff, hasPrev]
           properties:
             engine: { type: string, description: e.g. slither+semgrep+llm }
+            agentVersion:
+              type: string
+              description: Version of the agent that produced the review; '' when unreported.
             summary: { type: string }
             lines: { type: integer }
             filesScanned: { type: integer }
@@ -669,13 +674,25 @@ components:
         description: { type: string }
         code: { type: string, description: Offending snippet }
         recommendation: { type: string }
+        ruleId:
+          type: string
+          maxLength: 200
+          description: >-
+            Id of the tool rule or detector that raised the finding (e.g. slither
+            `reentrancy-eth`, a semgrep rule id). Trimmed; null or omitted = not sent.
+        locationKey:
+          type: string
+          maxLength: 200
+          description: >-
+            Enclosing function or symbol of the finding (e.g. `Vault.withdraw`).
+            Trimmed; null or omitted = not sent.
 
     Finding:
       type: object
       description: A finding as returned in a review report.
       required:
-        [severity, title, file, line, cwe, description, code, recommendation,
-         isNew, openRuns, ageHours, fingerprint, triage]
+        [severity, title, file, line, cwe, description, code, recommendation, ruleId,
+         locationKey, isNew, openRuns, ageHours, fingerprint, triage]
       properties:
         severity: { $ref: '#/components/schemas/Severity' }
         title: { type: string }
@@ -685,6 +702,8 @@ components:
         description: { type: string }
         code: { type: string }
         recommendation: { type: string }
+        ruleId: { type: string, description: "Agent-reported rule id; '' when not sent" }
+        locationKey: { type: string, description: "Agent-reported enclosing symbol; '' when not sent" }
         isNew: { type: boolean }
         openRuns: { type: integer, description: Consecutive scan cycles open }
         ageHours: { type: integer }
@@ -743,6 +762,13 @@ components:
           minimum: 0
           description: Defaults to the repo's registered line count if omitted
         filesScanned: { type: integer, minimum: 0, default: 0 }
+        agentVersion:
+          type: string
+          maxLength: 200
+          description: >-
+            Version of the agent that produced the review (e.g. `hermes-agent 1.4.2`).
+            Returned on the review detail. Not part of the dedup identity.
+            Trimmed; null or omitted = not sent.
         html:
           type: string
           description: Optional pre-rendered report body; sanitized server-side

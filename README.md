@@ -247,6 +247,7 @@ curl -X POST localhost:3000/api/repos/sapphire-paratime/reviews \
   "durationSecs": 231,
   "lines": 19200,
   "filesScanned": 80,
+  "agentVersion": "hermes-agent 1.4.2",
   "nextRunAt": "2026-06-18T18:00:00Z",
   "findings": [
     {
@@ -254,6 +255,8 @@ curl -X POST localhost:3000/api/repos/sapphire-paratime/reviews \
       "title": "Reentrancy in withdraw()",
       "file": "contracts/ConfidentialVault.sol",
       "line": 142,
+      "ruleId": "reentrancy-eth",
+      "locationKey": "ConfidentialVault.withdraw",
       "cwe": "CWE-841",
       "description": "Balance updated after an external call.",
       "code": "(bool ok,) = msg.sender.call{value: amt}(\"\");\nbal[msg.sender] -= amt;",
@@ -290,6 +293,27 @@ run** on the overview. The schedule is agent-driven — there is no fixed cadenc
 The dashboard shows "unscheduled" until the agent first reports a value. The last
 reported next run then **persists**: omitting `nextRunAt` on a later submit keeps
 the previous value, and sending `nextRunAt: 0` clears it back to "unscheduled".
+
+### Agent payload contract
+
+What the Hermes agent's scheduled review task must put in each review it posts,
+beyond the required `commit` and per-finding `severity` + `title`. Give this list
+to the task prompt verbatim:
+
+- **`agentVersion`** (review): the agent's own version string, e.g.
+  `hermes-agent 1.4.2`. Send it on every review.
+- **`ruleId`** (each finding): the id of the tool rule or detector that raised
+  the finding, copied exactly from the tool output: a slither detector name
+  (`reentrancy-eth`), a semgrep `check_id`, etc. Omit it when no tool raised the
+  finding (an LLM-only observation); don't invent ids.
+- **`locationKey`** (each finding): the function or symbol that contains the
+  finding, e.g. `ConfidentialVault.withdraw`, `crate::vault::withdraw`,
+  `(*Server).Handle`. Name the symbol, not the line: lines shift between commits,
+  the symbol doesn't. Omit it for file-level findings (pragma, config).
+
+Each is a string of at most 200 characters after trimming; a wrong type or a
+longer value is a 400. All three are optional, and payloads without them keep
+working.
 
 ### Read reviews / trends
 

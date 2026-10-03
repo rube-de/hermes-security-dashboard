@@ -32,6 +32,10 @@ export interface Finding {
 	description: string;
 	code: string;
 	recommendation: string;
+	/** Agent-reported detector/rule id (e.g. `reentrancy-eth`); '' when not sent. */
+	ruleId: string;
+	/** Agent-reported enclosing function/symbol (e.g. `Vault.withdraw`); '' when not sent. */
+	locationKey: string;
 	/** Whether this finding is new relative to the previous review of the same repo. */
 	isNew: boolean;
 	/** How many consecutive runs this finding has been open. */
@@ -75,6 +79,8 @@ export interface ReviewSummary {
 /** Full review with findings, diff and optional sanitized HTML body. */
 export interface ReviewDetail extends ReviewSummary {
 	engine: string;
+	/** Version of the agent that produced the review; '' when unreported. */
+	agentVersion: string;
 	summary: string;
 	lines: number;
 	filesScanned: number;

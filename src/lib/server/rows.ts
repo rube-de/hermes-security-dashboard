@@ -29,6 +29,7 @@ export interface ReviewRow {
 	resolved_count: number;
 	resolved_json: string;
 	content_hash: string | null;
+	agent_version: string;
 	created_at: number;
 }
 
@@ -47,4 +48,6 @@ export interface FindingRow {
 	fingerprint: string;
 	is_new: number;
 	first_seen_at: number;
+	rule_id: string;
+	location_key: string;
 }

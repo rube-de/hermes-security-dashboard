@@ -100,3 +100,18 @@ export function intField(
 	}
 	return { ok: true, value: v };
 }
+
+/**
+ * Optional string body field, trimmed: `undefined`/`null` → ''. Another type, or more
+ * than `max` characters after trimming, is an error; values are never truncated, so an
+ * over-long one is a visible client error rather than a silently altered value.
+ */
+export function stringField(v: unknown, label: string, max: number): ParamResult<string> {
+	if (v === undefined || v === null) return { ok: true, value: '' };
+	if (typeof v !== 'string') return { ok: false, error: `${label} must be a string` };
+	const s = v.trim();
+	if (s.length > max) {
+		return { ok: false, error: `${label} must be at most ${max} characters` };
+	}
+	return { ok: true, value: s };
+}

@@ -17,6 +17,10 @@ export interface FindingInput {
 	description?: string;
 	code?: string;
 	recommendation?: string;
+	/** Detector/rule id from the tool that raised the finding (e.g. `reentrancy-eth`). */
+	ruleId?: string;
+	/** Enclosing function or symbol of the finding (e.g. `Vault.withdraw`). */
+	locationKey?: string;
 }
 
 export interface ReviewInput {
@@ -31,6 +35,8 @@ export interface ReviewInput {
 	filesScanned?: number;
 	createdAt?: number;
 	findings?: FindingInput[];
+	/** Version of the agent that produced the review; '' when unreported. */
+	agentVersion?: string;
 }
 
 export function tx<T>(fn: () => T): T {
@@ -121,8 +127,9 @@ export function insertReview(
 		db.prepare(
 			`INSERT INTO reviews
 			 (id, repo_id, commit_hash, model, trigger, engine, summary, html, duration_secs, lines,
-			  files_scanned, prev_commit, new_count, resolved_count, resolved_json, content_hash, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			  files_scanned, prev_commit, new_count, resolved_count, resolved_json, content_hash,
+			  agent_version, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		).run(
 			reviewId,
 			repoId,
@@ -140,14 +147,15 @@ export function insertReview(
 			resolved.length,
 			JSON.stringify(resolved),
 			hash,
+			input.agentVersion ?? '',
 			now
 		);
 
 		const ins = db.prepare(
 			`INSERT INTO findings
 			 (review_id, repo_id, severity, title, file, line, cwe, description, code,
-			  recommendation, fingerprint, is_new, first_seen_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			  recommendation, fingerprint, is_new, first_seen_at, rule_id, location_key)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		);
 		for (const p of prepared) {
 			ins.run(
@@ -163,7 +171,9 @@ export function insertReview(
 				p.f.recommendation ?? '',
 				p.fp,
 				p.isNew ? 1 : 0,
-				p.firstSeen
+				p.firstSeen,
+				p.f.ruleId ?? '',
+				p.f.locationKey ?? ''
 			);
 		}
 	});
