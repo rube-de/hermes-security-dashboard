@@ -2,9 +2,9 @@ import { db } from './db';
 import { type RepoRow, type ReviewRow } from './rows';
 import { repoHead, latestReviewRowForCommit, unionFindingsForCommit } from './commits';
 import { reviewSummary } from './reviews';
-import { triageMapForRepo, quiets } from './triage';
+import { triageMapForRepo } from './triage';
 import { getScan } from './scan';
-import { langColor, countSeverities, fmtAgo, fmtDur } from '$lib/format';
+import { langColor, countSeverities, fmtAgo, fmtDur, quiets } from '$lib/format';
 import type { RepoDetail, RepoSummary } from '$lib/types';
 
 export interface RepoInput {

@@ -213,6 +213,7 @@ curl -X POST http://hermes-security-dashboard:3000/security/api/repos/:id/review
 | GET    | `/api/trends`                | Daily new/resolved/review aggregates   |
 | GET    | `/api/scan`                  | Current active-run state + dataVersion |
 | PUT    | `/api/scan`                  | Update active-run state                |
+| PUT    | `/api/repos/:id/findings/:fingerprint/triage` | Set or clear finding triage verdict |
 
 ### Register a repo
 
@@ -316,6 +317,25 @@ curl -X PUT localhost:3000/api/scan -H 'content-type: application/json' -d '{
 curl -X PUT localhost:3000/api/scan -H 'content-type: application/json' -d '{ "active": false }'
 ```
 
+### Triage a finding
+
+```sh
+curl -X PUT localhost:3000/api/repos/sapphire-paratime/findings/8d2b.../triage \
+  -H 'content-type: application/json' \
+  -H 'x-hermes-user: 0x1234...abcd' \
+  -d '{"status": "false_positive", "note": "Guarded by nonReentrant modifier"}'
+```
+
+Triage verdicts (`acknowledged`, `false_positive`, `accepted_risk`, or `open`/null to clear)
+attach to a finding's stable `(repo, fingerprint)` identity and persist across agent re-runs.
+`false_positive` and `accepted_risk` quiet the finding from headline severity counts.
+
+**Attribution:** The endpoint inspects the `x-hermes-user` header, set by the wallet gateway
+from the signed-in session address. The dashboard trusts this header because only whitelisted
+users reach it through the gateway. If missing or blank, `unknown` is stored.
+
+**Validation:** Triaging a critical or high finding as `false_positive` or `accepted_risk`
+**requires** a non-empty `note` justification (returns HTTP 400 if missing or whitespace).
 
 ### Re-run requests
 

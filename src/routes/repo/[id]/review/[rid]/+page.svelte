@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { SEV_LABEL, SEV_VAR, SEV_BG_VAR, TRIAGE_LABEL } from '$lib/format';
+	import { SEV_LABEL, SEV_VAR, SEV_BG_VAR, TRIAGE_LABEL, countSeverities, quiets, fmtAgo, fmtDate } from '$lib/format';
 	import FindingTriage from '$lib/components/FindingTriage.svelte';
 	import type { Triage } from '$lib/types';
 	import type { PageData } from './$types';
@@ -19,8 +19,14 @@
 		return e !== undefined ? e : f.triage;
 	}
 	function isDismissed(t: Triage | null): boolean {
-		return !!t && (t.status === 'false_positive' || t.status === 'accepted_risk');
+		return quiets(t);
 	}
+
+	const openFindings = $derived(
+		review.findings.filter((f) => !quiets(triageOf(f)))
+	);
+	const counts = $derived(countSeverities(openFindings));
+	const quietedCount = $derived(review.findings.length - openFindings.length);
 
 	const summaryText = $derived(
 		review.summary ||
@@ -64,27 +70,27 @@
 		<div class="band">
 			<div class="band-cell">
 				<div class="bl">Critical</div>
-				<div class="bn display" style="color:var(--crit)">{review.counts.crit}</div>
+				<div class="bn display" style="color:var(--crit)">{counts.crit}</div>
 			</div>
 			<div class="band-cell">
 				<div class="bl">High</div>
-				<div class="bn display" style="color:var(--high)">{review.counts.high}</div>
+				<div class="bn display" style="color:var(--high)">{counts.high}</div>
 			</div>
 			<div class="band-cell">
 				<div class="bl">Medium</div>
-				<div class="bn display" style="color:var(--med)">{review.counts.med}</div>
+				<div class="bn display" style="color:var(--med)">{counts.med}</div>
 			</div>
 			<div class="band-cell">
 				<div class="bl">Low</div>
-				<div class="bn display" style="color:var(--low)">{review.counts.low}</div>
+				<div class="bn display" style="color:var(--low)">{counts.low}</div>
 			</div>
 		</div>
 
 		<!-- exec summary -->
 		<div class="section">
-			{#if review.quietedCount > 0}
+			{#if quietedCount > 0}
 				<div class="qnote mono">
-					{review.quietedCount} finding{review.quietedCount > 1 ? 's' : ''} triaged out of the
+					{quietedCount} finding{quietedCount > 1 ? 's' : ''} triaged out of the
 					counts above (false-positive / accepted-risk) — still listed below, dimmed.
 				</div>
 			{/if}
@@ -141,10 +147,20 @@
 								<span class="arrow" aria-hidden="true">→</span>
 								<div><strong class="reck">Recommendation.</strong> {f.recommendation}</div>
 							</div>
+							{#if t}
+								<div class="triage-info mono">
+									<span class="triage-actor">Triaged by <strong>{t.triagedBy || 'unknown'}</strong></span>
+									<span class="triage-time" title={fmtDate(t.updatedAt || t.createdAt)}>{fmtAgo(t.updatedAt || t.createdAt)}</span>
+									{#if t.note}
+										<span class="triage-note">“{t.note}”</span>
+									{/if}
+								</div>
+							{/if}
 							<div class="ftriage">
 								<FindingTriage
 									repoId={repo.id}
 									fingerprint={f.fingerprint}
+									severity={f.severity}
 									current={t}
 									onChanged={(nt) => edits.set(f.fingerprint, nt)}
 								/>
@@ -461,6 +477,31 @@
 	}
 	.ftriage {
 		margin-top: 12px;
+	}
+	.triage-info {
+		margin-top: 10px;
+		padding: 6px 10px;
+		background: var(--surface2);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		font-size: 11.5px;
+		color: var(--dim);
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
+	}
+	.triage-actor strong {
+		color: var(--text);
+		font-weight: 600;
+	}
+	.triage-time {
+		color: var(--faint);
+	}
+	.triage-note {
+		color: var(--text);
+		font-style: italic;
+		width: 100%;
 	}
 	.finding.dismissed {
 		opacity: 0.5;

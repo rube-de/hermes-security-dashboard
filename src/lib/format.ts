@@ -48,6 +48,15 @@ export const TRIAGE_LABEL: Record<TriageStatus, string> = {
 	accepted_risk: 'Accepted risk'
 };
 
+/** The two verdicts that "quiet" a finding — drop it from actionable counts and a repo's
+ *  flagged/clean status at read time. `acknowledged` is deliberately NOT here: it marks a
+ *  finding as seen-but-real, so it keeps counting. */
+export const QUIETING = new Set<TriageStatus>(['false_positive', 'accepted_risk']);
+
+export function quiets(t: { status: TriageStatus } | null | undefined): boolean {
+	return !!t && QUIETING.has(t.status);
+}
+
 export const LANG_COLOR: Record<string, string> = {
 	Rust: '#DEA584',
 	Go: '#00ADD8',

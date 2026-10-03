@@ -1,15 +1,10 @@
 import { db } from './db';
-import type { Triage, TriageStatus } from '$lib/types';
+import type { Severity, Triage, TriageStatus } from '$lib/types';
 
+import { QUIETING, quiets } from '$lib/format';
+
+export { QUIETING, quiets };
 export const VALID_TRIAGE = new Set<TriageStatus>(['acknowledged', 'false_positive', 'accepted_risk']);
-// The two verdicts that "quiet" a finding — drop it from actionable counts and a repo's
-// flagged/clean status at read time. `acknowledged` is deliberately NOT here: it marks a
-// finding as seen-but-real, so it keeps counting.
-export const QUIETING = new Set<TriageStatus>(['false_positive', 'accepted_risk']);
-
-export function quiets(t: { status: TriageStatus } | null | undefined): boolean {
-	return !!t && QUIETING.has(t.status);
-}
 
 /**
  * Every human triage verdict for a repo, keyed by finding fingerprint. One repo-scoped
@@ -19,7 +14,7 @@ export function quiets(t: { status: TriageStatus } | null | undefined): boolean 
 export function triageMapForRepo(repoId: string): Map<string, Triage> {
 	const rows = db
 		.prepare(
-			'SELECT fingerprint, status, note, created_at, updated_at FROM finding_triage WHERE repo_id = ?'
+			'SELECT fingerprint, status, note, created_at, updated_at, triaged_by FROM finding_triage WHERE repo_id = ?'
 		)
 		.all(repoId) as {
 		fingerprint: string;
@@ -27,6 +22,7 @@ export function triageMapForRepo(repoId: string): Map<string, Triage> {
 		note: string;
 		created_at: number;
 		updated_at: number;
+		triaged_by: string;
 	}[];
 	const m = new Map<string, Triage>();
 	for (const r of rows) {
@@ -34,24 +30,26 @@ export function triageMapForRepo(repoId: string): Map<string, Triage> {
 		m.set(r.fingerprint, {
 			status: r.status,
 			note: r.note,
+			triagedBy: r.triaged_by || 'unknown',
 			createdAt: r.created_at,
 			updatedAt: r.updated_at
 		});
 	}
 	return m;
 }
-
 /** Latest stored title/file for a finding identity, or null if no finding in the repo
  *  carries this fingerprint. The authoritative source for the tag-time snapshot. */
-export function findingIdentity(repoId: string, fp: string): { title: string; file: string } | null {
+export function findingIdentity(
+	repoId: string,
+	fp: string
+): { title: string; file: string; severity: Severity } | null {
 	const row = db
 		.prepare(
-			'SELECT title, file FROM findings WHERE repo_id = ? AND fingerprint = ? ORDER BY first_seen_at DESC, id DESC LIMIT 1'
+			'SELECT title, file, severity FROM findings WHERE repo_id = ? AND fingerprint = ? ORDER BY first_seen_at DESC, id DESC LIMIT 1'
 		)
-		.get(repoId, fp) as { title: string; file: string } | undefined;
+		.get(repoId, fp) as { title: string; file: string; severity: Severity } | undefined;
 	return row ?? null;
 }
-
 /**
  * Upsert a human triage verdict for a finding identity. Last-write-wins on the single
  * (repo_id, fingerprint) row; created_at is preserved across updates, updated_at moves.
@@ -64,19 +62,22 @@ export function setTriage(
 	fp: string,
 	status: TriageStatus,
 	note = '',
+	triagedBy = 'unknown',
 	at = Date.now()
 ): boolean {
 	const ident = findingIdentity(repoId, fp);
 	if (!ident) return false;
+	const actor = triagedBy.trim().slice(0, 100) || 'unknown';
 	db.prepare(
 		`INSERT INTO finding_triage
-		 (repo_id, fingerprint, status, note, fp_title, fp_file, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 (repo_id, fingerprint, status, note, fp_title, fp_file, created_at, updated_at, triaged_by)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(repo_id, fingerprint) DO UPDATE SET
 		   status = excluded.status,
 		   note = excluded.note,
-		   updated_at = excluded.updated_at`
-	).run(repoId, fp, status, note, ident.title, ident.file, at, at);
+		   updated_at = excluded.updated_at,
+		   triaged_by = excluded.triaged_by`
+	).run(repoId, fp, status, note, ident.title, ident.file, at, at, actor);
 	return true;
 }
 
