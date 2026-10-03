@@ -22,7 +22,17 @@ export interface Triage {
 	updatedAt: number;
 }
 
-/** A single security finding as rendered in a report. */
+/** One place an issue was reported in a review. */
+export interface FindingLocation {
+	file: string;
+	line: number;
+	/** Agent-reported enclosing function/symbol; '' when not sent. */
+	locationKey: string;
+}
+
+/** A security issue as rendered in a report: every finding sharing an identity
+ *  (`fingerprint`) in one review, with the top-level fields taken from its most severe
+ *  (then earliest-reported) location. */
 export interface Finding {
 	severity: Severity;
 	title: string;
@@ -36,13 +46,16 @@ export interface Finding {
 	ruleId: string;
 	/** Agent-reported enclosing function/symbol (e.g. `Vault.withdraw`); '' when not sent. */
 	locationKey: string;
+	/** Every location of this issue in the review, ordered by file then line (≥ 1). */
+	locations: FindingLocation[];
 	/** Whether this finding is new relative to the previous review of the same repo. */
 	isNew: boolean;
 	/** How many consecutive runs this finding has been open. */
 	openRuns: number;
 	/** Age in hours since first detected. */
 	ageHours: number;
-	/** Stable per-repo finding identity (sha1 of file+title) — addresses triage writes. */
+	/** Stable per-repo issue identity: ruleId + file + locationKey when the agent sent a
+	 *  ruleId, else the legacy file + title hash. Addresses triage writes. */
 	fingerprint: string;
 	/** Human triage verdict, or null when untriaged ("open"). */
 	triage: Triage | null;
@@ -53,6 +66,8 @@ export interface ResolvedFinding {
 	severity: Severity;
 	title: string;
 	file: string;
+	/** Issue identity of the resolved finding (see Finding.fingerprint). */
+	fingerprint: string;
 }
 
 /** Lightweight review summary used in lists/tables. */

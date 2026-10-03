@@ -273,17 +273,22 @@ numeric fields (`durationSecs`, `lines`, `filesScanned`, a finding's `line`) mus
 be non-negative integers, and `findings`, when present, must be an array. A
 malformed body is a 400 and stores nothing.
 
+Every finding is stored. Findings that share an **identity** (see
+[Finding identity](#finding-identity)) are one issue with several locations, shown
+as e.g. "2 locations: L88, L140"; only exact duplicates (same identity at the same
+line + `locationKey`) collapse, keeping the most severe.
+
 A commit can be scanned more than once — LLM reviews are non-deterministic, and you
 may run several models against the same code. Submits are therefore idempotent on
 scan **content**, not on `(repo, commit)`. The content key is `commit` + `model` +
-`engine` + the finding set, where each finding contributes only its `severity` +
-`file` + `title` (the same identity used for the new/carried/resolved diff). A
+`engine` + the issue set, where each issue contributes only its identity and most
+severe `severity` (the same identity used for the new/carried/resolved diff). A
 resubmit with the same key returns the existing review (`duplicate: true`, HTTP 200);
 a re-run that finds a different issue, drops one, changes a severity, or runs a
 different `model` is stored as its own review. Note the key ignores a finding's
 `line`/`description`/`recommendation`/`code`, so a retry that only rewords those (or
 moves a line) dedups to the first report. Each scan shows up as its own row, newest
-first, with its `model`. A repo's headline status unions the findings across **all**
+first, with its `model`. A repo's headline status unions the issues across **all**
 scans of its current commit, so an issue one model flagged isn't hidden because a
 later model missed it.
 
@@ -311,9 +316,31 @@ to the task prompt verbatim:
   `(*Server).Handle`. Name the symbol, not the line: lines shift between commits,
   the symbol doesn't. Omit it for file-level findings (pragma, config).
 
+`ruleId` + `file` + `locationKey` become the finding's identity (see below), so
+the same issue must get the same values on every run.
+
 Each is a string of at most 200 characters after trimming; a wrong type or a
 longer value is a 400. All three are optional, and payloads without them keep
 working.
+
+### Finding identity
+
+Each finding gets an identity, the `fingerprint` the new/carried/resolved diff,
+the counts, the commit union and triage tags all key on:
+
+- **With a `ruleId`**: `ruleId` + `file` + `locationKey`. The title is not part of
+  it, so an LLM rewording a title between runs, or the code moving down a few
+  lines, keeps the issue (and its triage tag). The same rule in two functions is
+  two issues; the same rule twice in one function, or twice in a file without a
+  `locationKey`, is one issue with two locations.
+- **Without a `ruleId`**: `file` + `title`, the key every finding had before these
+  fields existed. Old findings and their triage tags keep their keys; nothing is
+  re-keyed. A `locationKey` alone is shown but doesn't split issues.
+
+Each component is trimmed and compared case-insensitively. When the agent starts
+sending `ruleId`, those findings move to new identities once: on that commit they
+show as new, the old file + title issues as resolved, and earlier triage tags don't
+carry over to them (re-tag the ones that still apply).
 
 ### Read reviews / trends
 
@@ -356,8 +383,9 @@ strings (or null). A field of the wrong type is a 400.
 ## Data model
 
 `node:sqlite` tables: `repos`, `reviews`, `findings`, `scan` (singleton live
-run), `meta` (next run, org label, etc.). Findings carry a stable `fingerprint`
-(`file` + `title`) so the same issue is tracked run-over-run — that's what powers
-the new/carried/resolved diff and per-finding age ("open N runs"). Server data
+run), `meta` (next run, org label, etc.). Each finding row is one location of an
+issue; rows of the same issue share a stable `fingerprint` (its
+[identity](#finding-identity)) so the issue is tracked run-over-run — that's what
+powers the new/carried/resolved diff and per-finding age ("open N runs"). Server data
 access lives in `src/lib/server/` (`db.ts`, `store.ts`, `seed.ts`,
 `sanitize.ts`, `auth.ts`).

@@ -1,16 +1,31 @@
 import { db } from './db';
 import { VALID_SEV, type ReviewRow } from './rows';
-import { emptyCounts, SEV_RANK } from '$lib/format';
+import { countSeverities, SEV_RANK } from '$lib/format';
 import type { Severity, SeverityCounts } from '$lib/types';
 
+/**
+ * One entry per issue identity (`fingerprint`) among finding rows, at the most severe
+ * rating any of its rows carries; the other fields come from its first row. A review
+ * stores one row per location of an issue, and the same issue appears again in every
+ * sibling scan of a commit, so anything that counts issues goes through here.
+ */
+function worstPerIssue<T extends { fingerprint: string; severity: Severity }>(rows: T[]): T[] {
+	const byFp = new Map<string, T>();
+	for (const row of rows) {
+		if (!VALID_SEV.has(row.severity)) continue;
+		const cur = byFp.get(row.fingerprint);
+		if (!cur) byFp.set(row.fingerprint, { ...row });
+		else if (SEV_RANK[row.severity] < SEV_RANK[cur.severity]) cur.severity = row.severity;
+	}
+	return [...byFp.values()];
+}
+
+/** Severity counts of a review's issues (not its rows: a multi-location issue counts once). */
 export function countsForReview(reviewId: string): SeverityCounts {
 	const rows = db
-		.prepare('SELECT severity, COUNT(*) AS n FROM findings WHERE review_id = ? GROUP BY severity')
-		.all(reviewId) as { severity: Severity; n: number }[];
-	const c = emptyCounts();
-	for (const r of rows) if (VALID_SEV.has(r.severity)) c[r.severity] = r.n;
-	c.total = c.crit + c.high + c.med + c.low;
-	return c;
+		.prepare('SELECT fingerprint, severity FROM findings WHERE review_id = ?')
+		.all(reviewId) as { fingerprint: string; severity: Severity }[];
+	return countSeverities(worstPerIssue(rows));
 }
 
 export interface UnionFinding {
@@ -24,10 +39,11 @@ export interface UnionFinding {
  * The deduped finding set for a repo's commit, unioned across every scan of that
  * commit. A commit can be scanned multiple times (non-deterministic re-runs,
  * different models); a finding any scan flagged is kept, and on a severity
- * disagreement the most severe rating wins. Deduped by fingerprint so the same
- * issue seen by two models counts once — hiding a real issue because the latest
- * model happened to miss it is the wrong failure mode for a security board. This
- * is the single source for both the headline status and a later commit's diff base.
+ * disagreement the most severe rating wins. Deduped by issue identity so the same
+ * issue seen by two models (or at several locations) counts once — hiding a real
+ * issue because the latest model happened to miss it is the wrong failure mode for a
+ * security board. This is the single source for both the headline status and a later
+ * commit's diff base.
  */
 export function unionFindingsForCommit(repoId: string, commit: string): UnionFinding[] {
 	const rows = db
@@ -37,14 +53,7 @@ export function unionFindingsForCommit(repoId: string, commit: string): UnionFin
 			  WHERE r.repo_id = ? AND r.commit_hash = ?`
 		)
 		.all(repoId, commit) as { fingerprint: string; severity: Severity; title: string; file: string }[];
-	const byFp = new Map<string, UnionFinding>();
-	for (const row of rows) {
-		if (!VALID_SEV.has(row.severity)) continue;
-		const cur = byFp.get(row.fingerprint);
-		if (!cur) byFp.set(row.fingerprint, { ...row });
-		else if (SEV_RANK[row.severity] < SEV_RANK[cur.severity]) cur.severity = row.severity;
-	}
-	return [...byFp.values()];
+	return worstPerIssue(rows);
 }
 
 /** Newest scan of a specific commit. Drives the repo card's "last scan" labels (so

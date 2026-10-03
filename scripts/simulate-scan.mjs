@@ -88,7 +88,20 @@ async function main() {
 				description: 'Any account can repoint the price feed.',
 				code: 'function setOracle(address o) external { oracle = o; }',
 				recommendation: 'Restrict to owner/governance with onlyOwner.'
-			}
+			},
+			// The same detector twice in one function: one issue with two locations.
+			...[61, 74].map((line) => ({
+				severity: 'med',
+				title: 'Return value of low-level call not checked',
+				file: 'contracts/RewardDistributor.sol',
+				line,
+				ruleId: 'unchecked-lowlevel',
+				locationKey: 'RewardDistributor.claim',
+				cwe: 'CWE-252',
+				description: 'A failed transfer is treated as paid out.',
+				code: 'payable(to).call{value: reward}("");',
+				recommendation: 'Check the returned success flag and revert on failure.'
+			}))
 		]
 	};
 

@@ -116,3 +116,44 @@ describe('agent contract fields: ruleId, locationKey, agentVersion', () => {
 		expect(over.body.error).toBe('findings[0].locationKey must be at most 200 characters');
 	});
 });
+
+describe('finding identity in GET /api/reviews/:id', () => {
+	beforeEach(() => {
+		resetDb();
+		addRepo({ id: repoId, lang: 'Solidity' });
+	});
+
+	const finding = (line: number, locationKey?: string) => ({
+		severity: 'high',
+		title: 'Unchecked external call',
+		file: 'contracts/Vault.sol',
+		line,
+		ruleId: 'unchecked-lowlevel',
+		locationKey
+	});
+
+	it('returns same file + title in different functions as separate issues', async () => {
+		const res = await submit({
+			commit: 'c001',
+			findings: [finding(88, 'Vault.withdraw'), finding(140, 'Vault.claim')]
+		});
+		const review = await fetchReview(res.body.reviewId);
+		expect(review.findings.map((f) => [f.locationKey, f.locations.map((l) => l.line)])).toEqual([
+			['Vault.withdraw', [88]],
+			['Vault.claim', [140]]
+		]);
+		expect(new Set(review.findings.map((f) => f.fingerprint)).size).toBe(2);
+		expect(review.counts.high).toBe(2);
+	});
+
+	it('returns the same case without locationKey as one issue listing both locations', async () => {
+		const res = await submit({ commit: 'c001', findings: [finding(140), finding(88)] });
+		const review = await fetchReview(res.body.reviewId);
+		expect(review.findings).toHaveLength(1);
+		expect(review.findings[0].locations).toEqual([
+			{ file: 'contracts/Vault.sol', line: 88, locationKey: '' },
+			{ file: 'contracts/Vault.sol', line: 140, locationKey: '' }
+		]);
+		expect(review.counts.high).toBe(1);
+	});
+});

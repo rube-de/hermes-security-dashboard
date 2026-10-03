@@ -35,6 +35,27 @@
 		const runs = `${f.openRuns} run${f.openRuns > 1 ? 's' : ''}`;
 		return `Carried · open ${runs} (${f.ageHours}h)`;
 	}
+
+	/** Where an issue was reported: "file:line", or "file · 2 locations: L88, L140" when
+	 *  it was reported at several places. The enclosing symbol is shown once when every
+	 *  location shares it, otherwise next to each line. */
+	function locationText(f: PageData['review']['findings'][number]): string {
+		const [first] = f.locations;
+		const sameFile = f.locations.every((l) => l.file === first.file);
+		const sameKey = f.locations.every((l) => l.locationKey === first.locationKey);
+		const parts: string[] = [];
+		if (sameFile) parts.push(f.locations.length === 1 ? `${first.file}:${first.line}` : first.file);
+		if (sameKey && first.locationKey) parts.push(first.locationKey);
+		if (f.locations.length > 1) {
+			const at = f.locations.map(
+				(l) =>
+					`${sameFile ? 'L' : `${l.file}:`}${l.line}` +
+					(!sameKey && l.locationKey ? ` ${l.locationKey}` : '')
+			);
+			parts.push(`${f.locations.length} locations: ${at.join(', ')}`);
+		}
+		return parts.join(' · ');
+	}
 </script>
 
 <svelte:head><title>Hermes · {repo.id} {review.commit}</title></svelte:head>
@@ -130,7 +151,7 @@
 								<span class="mono fcwe">{f.cwe}</span>
 								<span class="life mono" class:new={f.isNew}>{lifeText(f)}</span>
 								{#if t}<span class="tflag {t.status}">{TRIAGE_LABEL[t.status]}</span>{/if}
-								<span class="mono floc">{f.file}:{f.line}</span>
+								<span class="mono floc">{locationText(f)}</span>
 							</div>
 							<div class="ftitle display">{f.title}</div>
 							<div class="fdesc">{f.description}</div>

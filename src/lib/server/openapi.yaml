@@ -272,15 +272,22 @@ paths:
       operationId: submitReview
       summary: Submit a security review report
       description: |
+        Every finding is stored; only exact duplicates (same issue identity at the
+        same line + `locationKey`) collapse, to the most severe. Findings sharing an
+        identity are one issue with several locations. Identity is `ruleId` + `file`
+        + `locationKey` when the finding carries a `ruleId` (the title is ignored, so
+        rephrasing keeps it), else the legacy `file` + `title` key; see the
+        `fingerprint` field of Finding.
+
         A commit can be scanned more than once (non-deterministic LLM re-runs,
         different models), so submits are idempotent on scan **content**, not on
-        `(repo, commit)`. The content key is commit + model + engine + the finding
-        set, where each finding contributes only its severity + file + title (a
+        `(repo, commit)`. The content key is commit + model + engine + the issue set,
+        where each issue contributes only its identity + most severe rating (a
         finding's line/description/recommendation/code are not part of the key). A
         resubmit with the same key returns the existing review with `duplicate: true`
-        and HTTP 200; a different finding set, severity, or model creates a new
+        and HTTP 200; a different issue set, severity, or model creates a new
         review. The new/carried/resolved diff is a property of the *commit*: only a
-        commit's first scan carries a delta (computed against the union of findings on
+        commit's first scan carries a delta (computed against the union of issues on
         the previous commit), and re-scans of the same commit report a zero delta so a
         re-run can't fabricate churn. The repository must be registered first.
       security:
@@ -496,7 +503,8 @@ components:
       in: path
       required: true
       schema: { type: string }
-      description: Stable finding identity — the `fingerprint` field of a Finding
+      description: >-
+        Stable issue identity — the `fingerprint` field of a Finding (16 hex chars)
 
   responses:
     Unauthorized:
@@ -679,20 +687,35 @@ components:
           maxLength: 200
           description: >-
             Id of the tool rule or detector that raised the finding (e.g. slither
-            `reentrancy-eth`, a semgrep rule id). Trimmed; null or omitted = not sent.
+            `reentrancy-eth`, a semgrep rule id). When present, the finding's identity
+            is `ruleId` + `file` + `locationKey` instead of `file` + `title`. Trimmed;
+            null or omitted = not sent.
         locationKey:
           type: string
           maxLength: 200
           description: >-
-            Enclosing function or symbol of the finding (e.g. `Vault.withdraw`).
-            Trimmed; null or omitted = not sent.
+            Enclosing function or symbol of the finding (e.g. `Vault.withdraw`). Part of
+            the identity when a `ruleId` is sent; display-only otherwise. Trimmed; null
+            or omitted = not sent.
+
+    FindingLocation:
+      type: object
+      description: One place an issue was reported in a review.
+      required: [file, line, locationKey]
+      properties:
+        file: { type: string }
+        line: { type: integer }
+        locationKey: { type: string, description: "Enclosing symbol; '' when not sent" }
 
     Finding:
       type: object
-      description: A finding as returned in a review report.
+      description: >-
+        An issue in a review report: every finding of the review that shares an
+        identity (`fingerprint`), with the top-level fields taken from its most severe
+        (then earliest-reported) location.
       required:
         [severity, title, file, line, cwe, description, code, recommendation, ruleId,
-         locationKey, isNew, openRuns, ageHours, fingerprint, triage]
+         locationKey, locations, isNew, openRuns, ageHours, fingerprint, triage]
       properties:
         severity: { $ref: '#/components/schemas/Severity' }
         title: { type: string }
@@ -704,14 +727,23 @@ components:
         recommendation: { type: string }
         ruleId: { type: string, description: "Agent-reported rule id; '' when not sent" }
         locationKey: { type: string, description: "Agent-reported enclosing symbol; '' when not sent" }
+        locations:
+          type: array
+          minItems: 1
+          description: >-
+            Every location of this issue in the review, ordered by file then line. More
+            than one when the same issue was reported at several places.
+          items: { $ref: '#/components/schemas/FindingLocation' }
         isNew: { type: boolean }
         openRuns: { type: integer, description: Consecutive scan cycles open }
         ageHours: { type: integer }
         fingerprint:
           type: string
           description: >-
-            Stable per-repo finding identity (sha1 of file+title). The key a triage
-            verdict is attached to and addressed by.
+            Stable per-repo issue identity: a hash of `ruleId` + `file` + `locationKey`
+            when the agent sent a `ruleId`, else of `file` + `title` (the key every
+            finding had before `ruleId` existed). The key of the new/carried/resolved
+            diff, the counts, and triage: a verdict is attached to and addressed by it.
         triage:
           oneOf:
             - $ref: '#/components/schemas/Triage'
@@ -734,11 +766,12 @@ components:
 
     ResolvedFinding:
       type: object
-      required: [severity, title, file]
+      required: [severity, title, file, fingerprint]
       properties:
         severity: { $ref: '#/components/schemas/Severity' }
         title: { type: string }
         file: { type: string }
+        fingerprint: { type: string, description: Issue identity (see Finding) }
 
     ReviewInput:
       type: object
