@@ -32,8 +32,8 @@ CREATE TABLE reviews (
   repo_id        TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
   commit_hash    TEXT NOT NULL,
   model          TEXT NOT NULL DEFAULT '',
-  trigger        TEXT NOT NULL DEFAULT 'Scheduled',
-  engine         TEXT NOT NULL DEFAULT 'slither+semgrep+llm',
+  trigger        TEXT NOT NULL DEFAULT '',
+  engine         TEXT NOT NULL DEFAULT '',
   summary        TEXT NOT NULL DEFAULT '',
   html           TEXT,
   duration_secs  INTEGER NOT NULL DEFAULT 0,
@@ -44,6 +44,7 @@ CREATE TABLE reviews (
   resolved_count INTEGER NOT NULL DEFAULT 0,
   resolved_json  TEXT NOT NULL DEFAULT '[]',
   content_hash   TEXT,
+  agent_version  TEXT NOT NULL DEFAULT '',
   created_at     INTEGER NOT NULL
 );
 CREATE INDEX idx_reviews_repo ON reviews(repo_id, created_at DESC);
@@ -53,6 +54,8 @@ CREATE INDEX idx_reviews_repo ON reviews(repo_id, created_at DESC);
 CREATE UNIQUE INDEX idx_reviews_repo_hash ON reviews(repo_id, content_hash);
 -- Lookup index for the per-commit union (overview) and the openRuns scan.
 CREATE INDEX idx_reviews_commit ON reviews(repo_id, commit_hash);
+-- Global time-window scans (trends, review lists filtered by since/until).
+CREATE INDEX idx_reviews_created ON reviews(created_at);
 
 CREATE TABLE findings (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +71,9 @@ CREATE TABLE findings (
   recommendation TEXT NOT NULL DEFAULT '',
   fingerprint    TEXT NOT NULL,
   is_new         INTEGER NOT NULL DEFAULT 0,
-  first_seen_at  INTEGER NOT NULL
+  first_seen_at  INTEGER NOT NULL,
+  rule_id        TEXT NOT NULL DEFAULT '',
+  location_key   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX idx_findings_review ON findings(review_id);
 CREATE INDEX idx_findings_fp ON findings(repo_id, fingerprint);
@@ -89,6 +94,7 @@ CREATE TABLE finding_triage (
   fp_file     TEXT NOT NULL DEFAULT '',
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL,
+  triaged_by  TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (repo_id, fingerprint)
 );
 
@@ -116,7 +122,17 @@ type Migration = (db: DatabaseSync) => void;
  */
 export const MIGRATIONS: readonly Migration[] = [
 	// 1: everything the pre-versioning boot path applied on every start.
-	migration1Baseline
+	migration1Baseline,
+	// 2: agent contract fields, triage attribution, time-window index.
+	(db) => {
+		db.exec(`
+			ALTER TABLE reviews ADD COLUMN agent_version TEXT NOT NULL DEFAULT '';
+			ALTER TABLE findings ADD COLUMN rule_id TEXT NOT NULL DEFAULT '';
+			ALTER TABLE findings ADD COLUMN location_key TEXT NOT NULL DEFAULT '';
+			ALTER TABLE finding_triage ADD COLUMN triaged_by TEXT NOT NULL DEFAULT '';
+			CREATE INDEX idx_reviews_created ON reviews(created_at);
+		`);
+	}
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length;
