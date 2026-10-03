@@ -1,15 +1,10 @@
 import { db } from './db';
 import type { Triage, TriageStatus } from '$lib/types';
 
-export const VALID_TRIAGE = new Set<TriageStatus>(['acknowledged', 'false_positive', 'accepted_risk']);
-// The two verdicts that "quiet" a finding — drop it from actionable counts and a repo's
-// flagged/clean status at read time. `acknowledged` is deliberately NOT here: it marks a
-// finding as seen-but-real, so it keeps counting.
-export const QUIETING = new Set<TriageStatus>(['false_positive', 'accepted_risk']);
+import { QUIETING, quiets } from '$lib/format';
 
-export function quiets(t: { status: TriageStatus } | null | undefined): boolean {
-	return !!t && QUIETING.has(t.status);
-}
+export { QUIETING, quiets };
+export const VALID_TRIAGE = new Set<TriageStatus>(['acknowledged', 'false_positive', 'accepted_risk']);
 
 /**
  * Every human triage verdict for a repo, keyed by finding fingerprint. One repo-scoped

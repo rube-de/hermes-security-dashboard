@@ -1,9 +1,9 @@
 import { db } from './db';
 import { type ReviewRow, type FindingRow } from './rows';
 import { countsForReview } from './commits';
-import { triageMapForRepo, quiets } from './triage';
+import { triageMapForRepo } from './triage';
 import { fingerprint } from './fingerprint';
-import { fmtAgo, fmtDate, fmtDur, SEVERITIES, countSeverities } from '$lib/format';
+import { fmtAgo, fmtDate, fmtDur, SEVERITIES, countSeverities, quiets } from '$lib/format';
 import type { Finding, ResolvedFinding, ReviewDetail, ReviewSummary } from '$lib/types';
 
 // SQL severity ordering, derived from SEVERITIES so it can't drift from SEV_RANK.
