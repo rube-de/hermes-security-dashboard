@@ -161,9 +161,8 @@
 
 <style>
 	main {
-		max-width: 1180px;
-		margin: 0 auto;
-		padding: 26px;
+		padding-top: 26px;
+		padding-bottom: 26px;
 	}
 	.back {
 		display: inline-flex;

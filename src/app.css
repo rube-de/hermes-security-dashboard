@@ -76,7 +76,7 @@ body {
 	font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
 	-webkit-font-smoothing: antialiased;
 	text-rendering: optimizeLegibility;
-	padding-bottom: 72px;
+	padding-bottom: 0;
 	transition:
 		background 0.25s ease,
 		color 0.25s ease;
@@ -110,6 +110,18 @@ input {
 	clip: rect(0, 0, 0, 0);
 	white-space: nowrap;
 	border: 0;
+}
+
+/* ---- shared page container (1280px) ---- */
+.page-container,
+main {
+	width: 100%;
+	max-width: 1280px;
+	margin-left: auto;
+	margin-right: auto;
+	padding-left: 26px;
+	padding-right: 26px;
+	box-sizing: border-box;
 }
 
 ::selection {

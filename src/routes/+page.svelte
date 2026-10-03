@@ -299,9 +299,8 @@
 
 <style>
 	main {
-		max-width: 1340px;
-		margin: 0 auto;
-		padding: 30px 26px;
+		padding-top: 30px;
+		padding-bottom: 30px;
 	}
 	.title-row {
 		margin-bottom: 26px;

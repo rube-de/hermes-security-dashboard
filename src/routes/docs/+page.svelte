@@ -17,4 +17,13 @@
 	<title>API reference · Hermes Security Dashboard</title>
 </svelte:head>
 
-<div bind:this={container}></div>
+<main class="docs-main">
+	<div bind:this={container}></div>
+</main>
+
+<style>
+	.docs-main {
+		padding-top: 20px;
+		padding-bottom: 20px;
+	}
+</style>
