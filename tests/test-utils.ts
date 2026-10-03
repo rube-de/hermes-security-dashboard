@@ -12,6 +12,7 @@ export function resetDb(): void {
 	db.exec('DELETE FROM reviews;');
 	db.exec('DELETE FROM repos;');
 	db.exec('DELETE FROM meta;');
+	db.exec("INSERT INTO meta (key, value) VALUES ('data_version', '1');");
 	db.exec('DELETE FROM scan;');
 	db.exec('INSERT INTO scan (id, active) VALUES (1, 0);');
 	db.exec('PRAGMA foreign_keys = ON;');
