@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { listReviews } from '$lib/server/store';
+import { listReviews } from '$lib/server/reviews';
 import { readInt, readTime } from '$lib/server/params';
 import type { RequestHandler } from './$types';
 

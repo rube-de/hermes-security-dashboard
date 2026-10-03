@@ -1,5 +1,6 @@
 import { error } from '@sveltejs/kit';
-import { getRepoDetail, getReviewDetail } from '$lib/server/store';
+import { getRepoDetail } from '$lib/server/repos';
+import { getReviewDetail } from '$lib/server/reviews';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = ({ params }) => {

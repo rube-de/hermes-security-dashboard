@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
-import { getRepoDetail, requestRerun, getRerunRequest } from '$lib/server/store';
+import { getRepoDetail } from '$lib/server/repos';
+import { requestRerun, getRerunRequest } from '$lib/server/meta';
 import type { RequestHandler } from './$types';
 
 /**

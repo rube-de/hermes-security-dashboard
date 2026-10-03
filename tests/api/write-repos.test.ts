@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { POST as createRepo } from '../../src/routes/api/repos/+server';
 import { POST as requestRerun } from '../../src/routes/api/repos/[id]/rerun/+server';
 import { PUT as updateTriage } from '../../src/routes/api/repos/[id]/findings/[fingerprint]/triage/+server';
-import { addRepo, insertReview } from '$lib/server/store';
+import { addRepo } from '$lib/server/repos';
+import { insertReview } from '$lib/server/ingest';
 import { fingerprint } from '$lib/server/fingerprint';
 import { resetDb, callApi } from '../test-utils';
 

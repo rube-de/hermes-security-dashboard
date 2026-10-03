@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { getScan, setScan } from '$lib/server/store';
+import { getScan, setScan } from '$lib/server/scan';
 import { checkWriteAuth } from '$lib/server/auth';
 import type { RequestHandler } from './$types';
 

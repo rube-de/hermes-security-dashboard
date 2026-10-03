@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { POST as submitReview } from '../../src/routes/api/repos/[id]/reviews/+server';
 import { PUT as updateScan, POST as postScan } from '../../src/routes/api/scan/+server';
-import { addRepo, getReviewDetail } from '$lib/server/store';
+import { addRepo } from '$lib/server/repos';
+import { getReviewDetail } from '$lib/server/reviews';
 import { resetDb, callApi } from '../test-utils';
 
 interface ErrorResponse {

@@ -11,7 +11,9 @@ import { GET as getTrends } from '../../src/routes/api/trends/+server';
 import { GET as getHealth } from '../../src/routes/api/health/+server';
 import { GET as getOpenApi } from '../../src/routes/api/openapi.json/+server';
 
-import { addRepo, insertReview, requestRerun } from '$lib/server/store';
+import { addRepo } from '$lib/server/repos';
+import { insertReview } from '$lib/server/ingest';
+import { requestRerun } from '$lib/server/meta';
 import { resetDb, callApi } from '../test-utils';
 import type { Overview, RepoDetail, RepoSummary, ReviewDetail, ReviewSummary, ScanState, TrendBucket } from '$lib/types';
 

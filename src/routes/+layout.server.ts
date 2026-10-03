@@ -1,4 +1,5 @@
-import { getMeta, getScan } from '$lib/server/store';
+import { getMeta } from '$lib/server/meta';
+import { getScan } from '$lib/server/scan';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = () => {

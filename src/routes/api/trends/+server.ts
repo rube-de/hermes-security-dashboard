@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { getTrends } from '$lib/server/store';
+import { getTrends } from '$lib/server/trends';
 import { readInt } from '$lib/server/params';
 import type { RequestHandler } from './$types';
 

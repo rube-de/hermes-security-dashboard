@@ -1,13 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import {
-	addRepo,
-	insertReview,
-	setTriage,
-	clearTriage,
-	getRepoDetail,
-	getReviewDetail,
-	getOverview
-} from '$lib/server/store';
+import { addRepo, getRepoDetail } from '$lib/server/repos';
+import { insertReview } from '$lib/server/ingest';
+import { setTriage, clearTriage } from '$lib/server/triage';
+import { getReviewDetail } from '$lib/server/reviews';
+import { getOverview } from '$lib/server/overview';
 import { fingerprint } from '$lib/server/fingerprint';
 import { resetDb } from '../test-utils';
 

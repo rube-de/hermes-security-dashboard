@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { addRepo, getRepoDetail, listRepoSummaries } from '$lib/server/store';
+import { addRepo, getRepoDetail, listRepoSummaries } from '$lib/server/repos';
 import { checkWriteAuth } from '$lib/server/auth';
 import type { RequestHandler } from './$types';
 

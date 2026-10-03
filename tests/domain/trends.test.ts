@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { addRepo, insertReview, getTrends } from '$lib/server/store';
+import { addRepo } from '$lib/server/repos';
+import { insertReview } from '$lib/server/ingest';
+import { getTrends } from '$lib/server/trends';
 import { resetDb } from '../test-utils';
 
 // Pin timezone deterministically for DST calendar arithmetic tests

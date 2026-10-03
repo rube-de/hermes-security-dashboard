@@ -5,12 +5,9 @@
 	import { scan } from '$lib/scan.svelte';
 	import Logo from './Logo.svelte';
 
-	// Strip the base prefix so the route regexes below match regardless of the
-	// deploy path (page.url.pathname includes base, e.g. /security/repo/x).
-	const path = $derived(page.url.pathname.slice(base.length));
 	const repoId = $derived(page.params.id ?? null);
-	const isReview = $derived(/^\/repo\/[^/]+\/review\//.test(path));
-	const isRepo = $derived(/^\/repo\/[^/]+\/?$/.test(path));
+	const isReview = $derived(page.route.id === '/repo/[id]/review/[rid]');
+	const isRepo = $derived(page.route.id === '/repo/[id]');
 	const commit = $derived((page.data as { review?: { commit?: string } })?.review?.commit ?? null);
 </script>
 

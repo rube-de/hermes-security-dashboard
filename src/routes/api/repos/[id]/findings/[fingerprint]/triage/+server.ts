@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
-import { repoExists, setTriage, clearTriage } from '$lib/server/store';
+import { repoExists } from '$lib/server/repos';
+import { setTriage, clearTriage } from '$lib/server/triage';
 import type { TriageStatus } from '$lib/types';
 import type { RequestHandler } from './$types';
 

@@ -1,4 +1,4 @@
-import { getOverview } from '$lib/server/store';
+import { getOverview } from '$lib/server/overview';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = () => {

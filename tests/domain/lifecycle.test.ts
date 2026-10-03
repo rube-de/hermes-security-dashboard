@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { db } from '$lib/server/db';
-import { addRepo, insertReview, getReviewDetail, type ReviewInput } from '$lib/server/store';
+import { addRepo } from '$lib/server/repos';
+import { insertReview, type ReviewInput } from '$lib/server/ingest';
+import { getReviewDetail } from '$lib/server/reviews';
 import { resetDb } from '../test-utils';
 
 describe('insertReview lifecycle', () => {

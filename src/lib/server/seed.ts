@@ -1,5 +1,8 @@
 import { db } from './db';
-import { addRepo, insertReview, setMeta, setScan, type FindingInput, type ReviewInput } from './store';
+import { addRepo } from './repos';
+import { insertReview, type FindingInput, type ReviewInput } from './ingest';
+import { setMeta } from './meta';
+import { setScan } from './scan';
 import type { Severity } from '$lib/types';
 
 /**
@@ -232,7 +235,6 @@ export function seedIfEmpty(): void {
 	});
 
 	setMeta('org_label', 'Oasis Protocol');
-	setMeta('accent', '#54E0BE');
 	// Demo next run; the real agent reports this on each review submit (no fixed cadence).
 	setMeta('next_run_at', String(base0 + 6 * HOUR));
 	// All-time review count includes history predating this dashboard.
