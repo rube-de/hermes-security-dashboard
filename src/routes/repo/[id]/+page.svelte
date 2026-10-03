@@ -2,7 +2,7 @@
 	import { base } from '$app/paths';
 	import { scan } from '$lib/scan.svelte';
 	import { fmtDur, langColor } from '$lib/format';
-	import SeverityPills from '$lib/components/SeverityPills.svelte';
+	import CommitHistory from '$lib/components/CommitHistory.svelte';
 	import Time from '$lib/components/Time.svelte';
 	import type { PageData } from './$types';
 
@@ -80,12 +80,6 @@
 		</div>
 	</div>
 
-	{#if repo.headScanCount > 1}
-		<p class="union-note mono">
-			Status above unions {repo.headScanCount} scans of <span class="commit">{repo.headCommit}</span> —
-			a finding any scan flags is counted, so the headline can exceed an individual run below.
-		</p>
-	{/if}
 
 	{#if repo.quietedCount > 0}
 		<p class="union-note mono">
@@ -94,42 +88,7 @@
 		</p>
 	{/if}
 
-	<section class="history">
-		<div class="hist-head">
-			<h2 class="display">Review history</h2>
-			<span class="mono faint">click a run to open the report</span>
-		</div>
-		<div class="table card">
-			<div class="thead mono">
-				<div>Date</div>
-				<div>Commit</div>
-				<div>Model</div>
-				<div>Trigger</div>
-				<div>Findings</div>
-				<div>Duration</div>
-				<div></div>
-			</div>
-			{#each repo.reviews as rv (rv.id)}
-				<a class="rrow" href="{base}/repo/{repo.id}/review/{rv.id}">
-					<div class="mono rdate"><Time ts={rv.createdAt} /></div>
-					<div class="mono rcommit">{rv.commit}</div>
-					<div class="mono rmodel">{rv.model || '—'}</div>
-					<div class="rtrigger">{rv.trigger || '—'}</div>
-					<div class="rfind">
-						<SeverityPills counts={rv.counts} cleanLabel="✓ clean" />
-						{#if rv.hasDelta}
-							<span class="delta mono">
-								<span class="up">+{rv.newCount}</span>
-								<span class="down">−{rv.resolvedCount}</span>
-							</span>
-						{/if}
-					</div>
-					<div class="mono rdur">{fmtDur(rv.durationSecs)}</div>
-					<div class="rchev" aria-hidden="true">›</div>
-				</a>
-			{/each}
-		</div>
-	</section>
+	<CommitHistory repoId={repo.id} commits={repo.commits} />
 </main>
 
 <style>
@@ -290,104 +249,6 @@
 		color: var(--dim);
 		line-height: 1.5;
 	}
-	.union-note .commit {
-		color: var(--accent2);
-	}
-	.history {
-		margin-top: 26px;
-	}
-	.hist-head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		margin-bottom: 14px;
-	}
-	.hist-head h2 {
-		margin: 0;
-		font-weight: 600;
-		font-size: 18px;
-		color: var(--text);
-	}
-	.faint {
-		color: var(--faint);
-		font-size: 12px;
-	}
-	.table {
-		border-radius: 16px;
-		overflow: hidden;
-	}
-	.thead,
-	.rrow {
-		display: grid;
-		grid-template-columns: 1.2fr 0.9fr 0.95fr 0.85fr 1.5fr 0.75fr 32px;
-		gap: 14px;
-		align-items: center;
-	}
-	.thead {
-		padding: 12px 20px;
-		border-bottom: 1px solid var(--border);
-		font-size: 10px;
-		letter-spacing: 0.1em;
-		text-transform: uppercase;
-		color: var(--faint);
-	}
-	.rrow {
-		padding: 15px 20px;
-		border-bottom: 1px solid var(--border);
-		cursor: pointer;
-		transition: background 0.12s;
-	}
-	.rrow:last-child {
-		border-bottom: none;
-	}
-	.rrow:hover {
-		background: var(--hover);
-	}
-	.rdate {
-		font-size: 13px;
-		color: var(--text);
-	}
-	.rcommit {
-		font-size: 13px;
-		color: var(--accent2);
-	}
-	.rmodel {
-		font-size: 12px;
-		color: var(--dim);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	.rtrigger {
-		font-size: 12px;
-		color: var(--dim);
-	}
-	.rfind {
-		display: flex;
-		gap: 8px;
-		flex-wrap: wrap;
-		align-items: center;
-	}
-	.delta {
-		font-size: 11px;
-		color: var(--faint);
-		white-space: nowrap;
-	}
-	.delta .up {
-		color: var(--high);
-	}
-	.delta .down {
-		color: var(--accent);
-	}
-	.rdur {
-		font-size: 13px;
-		color: var(--dim);
-	}
-	.rchev {
-		color: var(--faint);
-		text-align: right;
-		font-size: 16px;
-	}
 
 	@media (max-width: 820px) {
 		.summary {
@@ -400,35 +261,6 @@
 	@media (max-width: 700px) {
 		.head {
 			flex-direction: column;
-		}
-		.thead {
-			display: none;
-		}
-		.rrow {
-			grid-template-columns: 1fr auto;
-			grid-template-areas: 'date chev' 'commit commit' 'model model' 'find find' 'dur dur';
-			gap: 6px;
-		}
-		.rdate {
-			grid-area: date;
-		}
-		.rcommit {
-			grid-area: commit;
-		}
-		.rmodel {
-			grid-area: model;
-		}
-		.rtrigger {
-			display: none;
-		}
-		.rfind {
-			grid-area: find;
-		}
-		.rdur {
-			grid-area: dur;
-		}
-		.rchev {
-			grid-area: chev;
 		}
 	}
 </style>

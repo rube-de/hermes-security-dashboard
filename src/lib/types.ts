@@ -87,7 +87,9 @@ export interface ReviewSummary {
 	durationSecs: number;
 	counts: SeverityCounts;
 	clean: boolean;
+	/** Repository-first discoveries in this scan, including those found on a re-scan. */
 	newCount: number;
+	/** Stored first-scan resolution snapshot against the preceding commit's union. */
 	resolvedCount: number;
 	hasDelta: boolean;
 }
@@ -138,8 +140,36 @@ export interface RepoSummary {
 	headScanCount: number;
 }
 
+/** One scan within a commit's history group. Counts exclude quieted issues. */
+export interface CommitScan {
+	reviewId: string;
+	model: string;
+	/** Epoch-ms when this scan was created. */
+	createdAt: number;
+	counts: SeverityCounts;
+	/** Issues in this scan found by no other model on the same commit. */
+	uniqueCount: number;
+}
+
+/** A code state, unioned across scans and compared with the preceding code state. */
+export interface CommitGroup {
+	commit: string;
+	/** Epoch-ms of this commit's first scan; re-scans do not reorder history. */
+	createdAt: number;
+	/** Worst severity per issue across all scans, excluding quieted issues. */
+	counts: SeverityCounts;
+	/** Issues absent from the preceding commit's union; zero without a predecessor. */
+	newCount: number;
+	/** Issues in the preceding union but absent here; zero without a predecessor. */
+	fixedCount: number;
+	/** At least one scan, newest first. */
+	scans: CommitScan[];
+}
+
 export interface RepoDetail extends RepoSummary {
 	reviews: ReviewSummary[];
+	/** Commit groups, most recently introduced first; scans within each are newest first. */
+	commits: CommitGroup[];
 }
 
 export interface TrendPoint {

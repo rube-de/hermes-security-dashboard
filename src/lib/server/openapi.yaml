@@ -130,7 +130,11 @@ paths:
     get:
       tags: [Repositories]
       operationId: getRepo
-      summary: Repository detail with full review history
+      summary: Repository detail with commit-grouped review history
+      description: >-
+        `commits` owns the new/fixed transition between consecutive introduced commits,
+        unioning every scan's issues and excluding quieted triage. The flat `reviews`
+        list is retained for scan-level consumers.
       parameters:
         - $ref: '#/components/parameters/RepoId'
       responses:
@@ -305,10 +309,12 @@ paths:
         finding's line/description/recommendation/code are not part of the key). A
         resubmit with the same key returns the existing review with `duplicate: true`
         and HTTP 200; a different issue set, severity, or model creates a new
-        review. The new/carried/resolved diff is a property of the *commit*: only a
-        commit's first scan carries a delta (computed against the union of issues on
-        the previous commit), and re-scans of the same commit report a zero delta so a
-        re-run can't fabricate churn. The repository must be registered first.
+        review. Stored scan-level `newCount` counts repository-first discoveries,
+        including issues first found on a re-scan. Stored `resolvedCount` is computed
+        only on a commit's first scan against the previous commit's union. These are
+        scan snapshots, not commit-history deltas: `GET /api/repos/{id}` exposes
+        `commits`, whose new/fixed counts compare consecutive commits' complete unions
+        at read time. The repository must be registered first.
       security:
         - bearerAuth: []
       parameters:
@@ -618,12 +624,63 @@ components:
       allOf:
         - $ref: '#/components/schemas/RepoSummary'
         - type: object
-          required: [reviews]
+          required: [reviews, commits]
           properties:
             reviews:
               type: array
               description: Reviews for this repo, newest first
               items: { $ref: '#/components/schemas/ReviewSummary' }
+            commits:
+              type: array
+              description: >-
+                One group per commit, newest introduced first (first scan time, with
+                first insertion breaking ties). Later re-scans do not reorder commits.
+              items: { $ref: '#/components/schemas/CommitGroup' }
+
+    CommitGroup:
+      type: object
+      description: >-
+        Unioned code-state history. Counts and new/fixed transitions exclude issues
+        quieted by current triage. Deltas compare with the immediately preceding
+        introduced commit's complete union, not a single scan or lifetime sightings;
+        late scans update both affected transitions.
+      required: [commit, createdAt, counts, newCount, fixedCount, scans]
+      properties:
+        commit: { type: string, description: Commit hash reviewed }
+        createdAt: { type: integer, description: Epoch-ms of this commit's first scan }
+        counts:
+          allOf: [{ $ref: '#/components/schemas/SeverityCounts' }]
+          description: >-
+            Union of issues across all scans, one per fingerprint at its worst severity,
+            excluding false-positive and accepted-risk triage.
+        newCount:
+          type: integer
+          description: Issues absent from the preceding union; zero for the oldest commit
+        fixedCount:
+          type: integer
+          description: Issues in the preceding union but absent here; zero for the oldest commit
+        scans:
+          type: array
+          minItems: 1
+          description: Individual scans of this commit, newest first
+          items: { $ref: '#/components/schemas/CommitScan' }
+
+    CommitScan:
+      type: object
+      required: [reviewId, model, createdAt, counts, uniqueCount]
+      properties:
+        reviewId: { type: string, description: Review UUID for the report link }
+        model: { type: string, description: "Model that produced the scan; '' when unreported" }
+        createdAt: { type: integer, description: Epoch-ms when the scan was created }
+        counts:
+          allOf: [{ $ref: '#/components/schemas/SeverityCounts' }]
+          description: Issues in this scan, excluding quieted triage
+        uniqueCount:
+          type: integer
+          description: >-
+            Issues in this scan that no other model found on the same commit,
+            excluding quieted triage. Repeated scans of the same model do not remove
+            model uniqueness; unreported models all share the empty-string bucket.
 
     ReviewSummary:
       type: object
@@ -644,8 +701,12 @@ components:
         durationSecs: { type: integer, description: Scan duration in seconds }
         counts: { $ref: '#/components/schemas/SeverityCounts' }
         clean: { type: boolean }
-        newCount: { type: integer }
-        resolvedCount: { type: integer }
+        newCount:
+          type: integer
+          description: Repository-first issue discoveries in this scan; may be nonzero on a re-scan
+        resolvedCount:
+          type: integer
+          description: Stored first-scan resolution snapshot against the prior commit union; zero on re-scans
         hasDelta: { type: boolean }
 
     ReviewDetail:

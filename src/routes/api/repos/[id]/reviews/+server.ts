@@ -30,9 +30,10 @@ export const GET: RequestHandler = ({ params }) => {
  * A commit can be scanned more than once (non-deterministic LLM re-runs, different
  * models), so submits are idempotent on scan *content* — commit + model + engine +
  * finding set — not on (repo, commit): a byte-equivalent resubmit returns the
- * existing review, anything else is a new one. The diff (new / carried / resolved)
- * is a property of the commit: only a commit's first scan carries a delta (against
- * the previous commit's union of findings); re-scans of the same commit report none.
+ * existing review, anything else is a new one. Stored newCount counts repository-first
+ * issue discoveries (including on re-scans); resolvedCount is a first-scan snapshot
+ * against the previous commit's union. For commit-to-commit transitions use
+ * GET /api/repos/:id: its commits groups compare complete, triage-aware unions.
  */
 export const POST: RequestHandler = async ({ params, request }) => {
 	const denied = checkWriteAuth(request);

@@ -51,8 +51,8 @@ export interface ListReviewsOpts {
 
 /**
  * Reviews across all repos (or one repo), newest first. Each row carries its
- * severity counts plus new/resolved deltas, so a consumer can build any trend
- * or analytics view it likes.
+ * severity counts and stored discovery/resolution snapshots for scan analytics.
+ * Commit-to-commit transitions are exposed separately in RepoDetail.commits.
  */
 export function listReviews(opts: ListReviewsOpts = {}): ReviewSummary[] {
 	const where: string[] = [];
