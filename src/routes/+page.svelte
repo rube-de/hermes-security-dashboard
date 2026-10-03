@@ -156,7 +156,7 @@
 			<div class="run-big display">{o.lastRunLabel}</div>
 			<div class="muted sm">{o.reposCount} repos scanned</div>
 		</div>
-		<div class="card run active">
+		<div class="card run active" role="status">
 			<div class="run-overlay"></div>
 			<div class="run-inner">
 				<div class="active-head">
@@ -222,22 +222,39 @@
 		</div>
 		<div class="filter-controls">
 			<div class="search">
-				<span class="faint">⌕</span>
-				<input class="mono" placeholder="Search repos…" bind:value={q} />
+				<label for="repo-search" class="visually-hidden">Search repositories</label>
+				<span class="faint" aria-hidden="true">⌕</span>
+				<input
+					id="repo-search"
+					class="mono"
+					placeholder="Search repos…"
+					aria-label="Search repositories"
+					bind:value={q}
+				/>
 			</div>
-			<div class="chips">
+			<div class="chips" role="group" aria-label="Filter by status">
 				{#each statusOptions as s (s.key)}
-					<button class="chip mono" class:on={fStatus === s.key} onclick={() => (fStatus = s.key)}>
+					<button
+						class="chip mono"
+						class:on={fStatus === s.key}
+						aria-pressed={fStatus === s.key}
+						onclick={() => (fStatus = s.key)}
+					>
 						{s.label}
 					</button>
 				{/each}
 			</div>
 		</div>
 	</div>
-	<div class="chips sev-chips">
+	<div class="chips sev-chips" role="group" aria-label="Filter by severity">
 		{#each sevOptions as s (s.key)}
-			<button class="chip mono" class:on={fSev === s.key} onclick={() => (fSev = s.key)}>
-				{#if s.dot}<span class="chip-dot" style="background:{s.dot}"></span>{/if}{s.label}
+			<button
+				class="chip mono"
+				class:on={fSev === s.key}
+				aria-pressed={fSev === s.key}
+				onclick={() => (fSev = s.key)}
+			>
+				{#if s.dot}<span class="chip-dot" style="background:{s.dot}" aria-hidden="true"></span>{/if}{s.label}
 			</button>
 		{/each}
 	</div>
@@ -273,7 +290,7 @@
 						<SeverityPills counts={r.counts} cleanLabel="✓ all clear" />
 					</div>
 					<div class="cell-scan mono">{r.lastRunLabel}</div>
-					<div class="cell-chev">›</div>
+					<div class="cell-chev" aria-hidden="true">›</div>
 				</a>
 			{/each}
 		{/if}
@@ -282,9 +299,8 @@
 
 <style>
 	main {
-		max-width: 1340px;
-		margin: 0 auto;
-		padding: 30px 26px;
+		padding-top: 30px;
+		padding-bottom: 30px;
 	}
 	.title-row {
 		margin-bottom: 26px;
@@ -547,6 +563,12 @@
 		background: var(--surface);
 		border: 1px solid var(--border);
 		border-radius: 9px;
+		transition: border-color 0.15s;
+	}
+	.search:focus-within {
+		border-color: var(--accent);
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
 	}
 	.search input {
 		border: none;

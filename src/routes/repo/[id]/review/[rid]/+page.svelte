@@ -124,6 +124,7 @@
 								<span
 									class="fpill"
 									style="--c:{SEV_VAR[f.severity]};--b:{SEV_BG_VAR[f.severity]}"
+									aria-label="{SEV_LABEL[f.severity]}"
 									>{SEV_LABEL[f.severity]}</span
 								>
 								<span class="mono fcwe">{f.cwe}</span>
@@ -137,7 +138,7 @@
 								<pre class="fcode mono">{f.code}</pre>
 							{/if}
 							<div class="frec">
-								<span class="arrow">→</span>
+								<span class="arrow" aria-hidden="true">→</span>
 								<div><strong class="reck">Recommendation.</strong> {f.recommendation}</div>
 							</div>
 							<div class="ftriage">
@@ -157,13 +158,16 @@
 			{#if review.resolved.length > 0}
 				<div class="resolved">
 					<div class="slabel mono accent">
-						<span class="rdot"></span>Resolved since {review.prevCommit}
+						<span class="rdot" aria-hidden="true"></span>Resolved since {review.prevCommit}
 					</div>
 					<div class="rlist">
 						{#each review.resolved as rf, i (i)}
 							<div class="ritem">
-								<span class="rcheck">✓</span>
-								<span class="fpill sm" style="--c:{SEV_VAR[rf.severity]};--b:{SEV_BG_VAR[rf.severity]}"
+								<span class="rcheck" aria-hidden="true">✓</span>
+								<span
+									class="fpill sm"
+									style="--c:{SEV_VAR[rf.severity]};--b:{SEV_BG_VAR[rf.severity]}"
+									aria-label="{SEV_LABEL[rf.severity]}"
 									>{SEV_LABEL[rf.severity]}</span
 								>
 								<span class="rtitle">{rf.title}</span>
@@ -196,9 +200,8 @@
 
 <style>
 	main {
-		max-width: 920px;
-		margin: 0 auto;
-		padding: 26px;
+		padding-top: 26px;
+		padding-bottom: 26px;
 	}
 	.back {
 		display: inline-flex;

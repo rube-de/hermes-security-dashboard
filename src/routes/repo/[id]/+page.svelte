@@ -72,7 +72,7 @@
 	</div>
 
 	{#if scanning}
-		<div class="scan-banner">
+		<div class="scan-banner" role="status">
 			<span class="scan-dot"></span>
 			<div class="scan-text mono">
 				Review in progress — <span class="dim">scanning {live.currentFile ?? '…'}</span>
@@ -152,7 +152,7 @@
 						{/if}
 					</div>
 					<div class="mono rdur">{rv.durationLabel}</div>
-					<div class="rchev">›</div>
+					<div class="rchev" aria-hidden="true">›</div>
 				</a>
 			{/each}
 		</div>
@@ -161,9 +161,8 @@
 
 <style>
 	main {
-		max-width: 1180px;
-		margin: 0 auto;
-		padding: 26px;
+		padding-top: 26px;
+		padding-bottom: 26px;
 	}
 	.back {
 		display: inline-flex;
