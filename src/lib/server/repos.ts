@@ -5,6 +5,7 @@ import { reviewSummary } from './reviews';
 import { triageMapForRepo } from './triage';
 import { getScan } from './scan';
 import { countSeverities, quiets } from '$lib/format';
+import { compareRepos } from '$lib/repo-sort';
 import type { RepoDetail, RepoSummary } from '$lib/types';
 
 export interface RepoInput {
@@ -66,6 +67,11 @@ export function buildRepoSummary(repo: RepoRow, scanRepoId: string | null): Repo
 	const open = union.filter((f) => !quiets(triage.get(f.fingerprint)));
 	const counts = countSeverities(open);
 	const quietedCount = union.length - open.length;
+	let oldestOpenAt: number | null = null;
+	for (const f of open) {
+		if (f.severity !== 'crit' && f.severity !== 'high') continue;
+		if (oldestOpenAt === null || f.firstSeenAt < oldestOpenAt) oldestOpenAt = f.firstSeenAt;
+	}
 	const status: 'flagged' | 'clean' = counts.total > 0 ? 'flagged' : 'clean';
 	return {
 		id: repo.id,
@@ -79,6 +85,7 @@ export function buildRepoSummary(repo: RepoRow, scanRepoId: string | null): Repo
 		status,
 		clean: status === 'clean',
 		scanning: scanRepoId === repo.id,
+		oldestOpenAt,
 		lastRunAt: headScan?.created_at ?? null,
 		lastDurationSecs: headScan?.duration_secs ?? null,
 		filesScanned: headScan?.files_scanned ?? 0,
@@ -90,7 +97,7 @@ export function buildRepoSummary(repo: RepoRow, scanRepoId: string | null): Repo
 export function listRepoSummaries(): RepoSummary[] {
 	const scan = getScan();
 	const scanRepoId = scan.active ? scan.repoId : null;
-	return allRepoRows().map((r) => buildRepoSummary(r, scanRepoId));
+	return allRepoRows().map((r) => buildRepoSummary(r, scanRepoId)).sort(compareRepos);
 }
 
 export function getRepoDetail(id: string): RepoDetail | null {

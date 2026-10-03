@@ -127,6 +127,9 @@ export interface RepoSummary {
 	status: 'flagged' | 'clean';
 	clean: boolean;
 	scanning: boolean;
+	/** Earliest first-seen epoch-ms among open crit/high issues in the head-commit union;
+	 *  null when none remain after triage quieting. */
+	oldestOpenAt: number | null;
 	/** Epoch-ms of the current commit's latest scan, or null if never scanned. */
 	lastRunAt: number | null;
 	/** Duration in seconds of that scan, or null if never scanned. */

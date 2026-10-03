@@ -156,7 +156,7 @@ Point the sync sidecar at the snapshot file (default `${HERMES_DB}.snapshot`),
 
 | Route                          | What                                                        |
 | ------------------------------ | ---------------------------------------------------------- |
-| `/`                            | Overview — totals by severity, run strip, trend, repo list with search + status/severity filters |
+| `/`                            | Overview — compact severity strip, needs attention, scan status, risk-sorted repo table with search + status/severity filters |
 | `/repo/[id]`                   | Repo detail — metric summary, live scan banner, review history |
 | `/repo/[id]/review/[reviewId]` | Review report — severity band, summary, diff vs previous run, findings with code + remediation, resolved section |
 
@@ -169,6 +169,16 @@ Times are formatted in the browser: absolute times in its local time zone (hover
 one for the full date and zone name), relative ones ("2h 14m ago", "in 3h") on a
 shared 30-second clock, so they stay current without a reload. Server-rendered
 HTML shows UTC times until the page hydrates.
+
+The overview puts repositories with open critical or high findings in **Needs
+attention**. Its repository table (and `GET /api/repos` / the overview's `repos`
+array) defaults to highest open severity, then critical/high issue count, then
+oldest open issue. Column-header buttons change the table sort. **Oldest open**
+uses `RepoSummary.oldestOpenAt`: the earliest first-seen epoch-ms among unresolved
+critical/high issues in the head-commit union, across every model and location.
+False-positive and accepted-risk triage are excluded; acknowledged issues remain
+open. The field is `null` when no open critical/high issues remain. Language tags
+are neutral text so they cannot be confused with severity.
 
 ## Agent API
 

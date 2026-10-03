@@ -90,9 +90,12 @@ paths:
       tags: [Repositories]
       operationId: listRepos
       summary: List repository summaries
+      description: >-
+        Sorted by highest open severity, then critical/high issue count, then oldest
+        open critical/high first-seen timestamp. Repository ID breaks remaining ties.
       responses:
         '200':
-          description: All repositories with status from their latest review
+          description: All repositories with status from their head-commit finding union
           content:
             application/json:
               schema:
@@ -580,7 +583,7 @@ components:
         introduced one), unioned across all of that commit's scans.
       required:
         [id, lang, description, path, branch, lines, counts, quietedCount, status, clean,
-         scanning, lastRunAt, lastDurationSecs, filesScanned, headCommit, headScanCount]
+         scanning, oldestOpenAt, lastRunAt, lastDurationSecs, filesScanned, headCommit, headScanCount]
       properties:
         id: { type: string }
         lang: { type: string }
@@ -600,6 +603,12 @@ components:
         status: { type: string, enum: [flagged, clean] }
         clean: { type: boolean }
         scanning: { type: boolean }
+        oldestOpenAt:
+          type: [integer, 'null']
+          description: >-
+            Earliest first-seen epoch-ms among unresolved critical/high issues in the
+            head-commit finding union, excluding false-positive and accepted-risk triage.
+            Null when no open critical/high issues remain.
         lastRunAt:
           type: [integer, 'null']
           description: Epoch-ms of the current commit's latest scan, or null if never scanned.
