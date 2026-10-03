@@ -11,7 +11,7 @@ export const GET: RequestHandler = () => {
 			{
 				ok: false,
 				service: 'hermes-security-dashboard',
-				error: (err as Error).message || 'database unavailable'
+				error: (err instanceof Error && err.message) || 'database unavailable'
 			},
 			{ status: 503 }
 		);
