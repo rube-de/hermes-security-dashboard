@@ -1,16 +1,18 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { TRIAGE_STATUSES, TRIAGE_LABEL } from '$lib/format';
-	import type { Triage, TriageStatus } from '$lib/types';
+	import type { Severity, Triage, TriageStatus } from '$lib/types';
 
 	let {
 		repoId,
 		fingerprint,
+		severity,
 		current,
 		onChanged
 	}: {
 		repoId: string;
 		fingerprint: string;
+		severity?: Severity;
 		current: Triage | null;
 		onChanged: (t: Triage | null) => void;
 	} = $props();
@@ -41,13 +43,21 @@
 	// the single source of truth for display — updates without a reload.
 	async function apply(status: TriageStatus | 'open') {
 		if (busy) return;
-		busy = true;
 		err = '';
+		const trimmedNote = note.trim();
+		const isCritOrHigh = severity === 'crit' || severity === 'high';
+		const isDismissal = status === 'false_positive' || status === 'accepted_risk';
+		if (isCritOrHigh && isDismissal && !trimmedNote) {
+			err = 'A note is required for false positive or accepted risk on critical/high findings';
+			return;
+		}
+
+		busy = true;
 		try {
 			const res = await fetch(`${base}/api/repos/${repoId}/findings/${fingerprint}/triage`, {
 				method: 'PUT',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ status, note: note.trim() })
+				body: JSON.stringify({ status, note: trimmedNote })
 			});
 			if (!res.ok) {
 				const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -57,10 +67,12 @@
 			if (status === 'open') {
 				onChanged(null);
 			} else {
+				const body = (await res.json().catch(() => ({}))) as { triagedBy?: string };
 				const now = Date.now();
 				onChanged({
 					status,
-					note: note.trim(),
+					note: trimmedNote,
+					triagedBy: body.triagedBy || current?.triagedBy || 'unknown',
 					createdAt: current?.createdAt ?? now,
 					updatedAt: now
 				});

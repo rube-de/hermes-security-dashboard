@@ -196,13 +196,22 @@ paths:
       operationId: setFindingTriage
       summary: Set or clear a human triage verdict on a finding
       description: |
-        Open endpoint (no auth) — a dashboard user affordance, not an agent data write.
-        Keyed on the finding's stable fingerprint so the verdict persists across agent
-        re-runs. `status: open` (or null) clears the verdict. Setting a verdict 404s if
-        no finding in the repo currently carries the fingerprint; clearing is idempotent.
+        User affordance for triage verdicts. Keyed on the finding's stable fingerprint
+        so the verdict persists across agent re-runs. `status: open` (or null) clears
+        the verdict. Setting a verdict 404s if no finding in the repo currently carries
+        the fingerprint; clearing is idempotent.
+        Reads identity from `x-hermes-user` header (forwarded by wallet gateway) and
+        records it as `triagedBy` (or 'unknown' when omitted).
+        Dismissing critical or high findings (false_positive or accepted_risk) requires
+        a non-empty note.
       parameters:
         - $ref: '#/components/parameters/RepoId'
         - $ref: '#/components/parameters/Fingerprint'
+        - name: x-hermes-user
+          in: header
+          required: false
+          description: Signed-in user identity forwarded by the wallet gateway
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -230,6 +239,9 @@ paths:
                     type: string
                     enum: [open, acknowledged, false_positive, accepted_risk]
                   note: { type: string }
+                  triagedBy:
+                    type: string
+                    description: Actor who triaged the finding, or 'unknown'
                   cleared:
                     type: boolean
                     description: Present on a clear; whether a row was actually removed
@@ -686,15 +698,17 @@ components:
       description: >-
         Human triage verdict on a finding, persisted across agent re-runs. acknowledged
         still counts toward a repo's status; false_positive and accepted_risk quiet it.
-      required: [status, note, createdAt, updatedAt]
+      required: [status, note, triagedBy, createdAt, updatedAt]
       properties:
         status:
           type: string
           enum: [acknowledged, false_positive, accepted_risk]
         note: { type: string, description: Free-text justification }
+        triagedBy:
+          type: string
+          description: Actor who triaged the finding (from x-hermes-user, or 'unknown')
         createdAt: { type: integer, description: First tagged (epoch-ms) }
         updatedAt: { type: integer, description: Last changed (epoch-ms) }
-
     ResolvedFinding:
       type: object
       required: [severity, title, file]

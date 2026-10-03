@@ -16,8 +16,10 @@ export type TriageStatus = 'acknowledged' | 'false_positive' | 'accepted_risk';
 
 export interface Triage {
 	status: TriageStatus;
-	/** Free-text justification — expected for false_positive / accepted_risk. */
+	/** Free-text justification — required for false_positive / accepted_risk on crit/high. */
 	note: string;
+	/** Actor who triaged this finding (from x-hermes-user header, or 'unknown'). */
+	triagedBy: string;
 	createdAt: number;
 	updatedAt: number;
 }
