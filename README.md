@@ -26,11 +26,12 @@ accent, Space Grotesk / IBM Plex Sans / IBM Plex Mono). Dark and light themes.
 ```sh
 bun install
 bun run dev            # http://localhost:5173
+bun run test           # vitest run (Node runtime, in-memory DB)
+bun run check          # svelte-check type verification
 
 bun run build          # production build (adapter-node)
 node build             # serve build/ (PORT, default 3000)
 ```
-
 On first boot the database is seeded with demo data (10 Oasis repos, realistic
 findings, review history, a live scan). It's a no-op once real data exists.
 
@@ -43,6 +44,18 @@ Drive the live UI like the real agent would:
 ```sh
 HERMES_URL=http://localhost:5173 node scripts/simulate-scan.mjs sapphire-paratime
 ```
+
+## Testing
+
+Tests run under **Node** via Vitest with `HERMES_DB=':memory:'`:
+
+```sh
+bun run test
+```
+
+Each test file gets an isolated in-memory SQLite database. For resetting database state between test cases or invoking API route handlers directly, `tests/test-utils.ts` provides:
+- `resetDb()`: truncates tables and restores default singleton rows (`scan`, `meta`).
+- `callApi(handler, options)`: calls route handlers with a minimal `RequestEvent` object, parses JSON responses, and handles `@sveltejs/kit` `HttpError`s.
 
 ## Deploy
 

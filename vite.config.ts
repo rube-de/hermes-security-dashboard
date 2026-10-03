@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
@@ -22,5 +23,12 @@ export default defineConfig({
 			adapter: adapter(),
 			paths: { base }
 		})
-	]
+	],
+	test: {
+		include: ['tests/**/*.test.ts', 'src/**/*.test.ts'],
+		environment: 'node',
+		env: {
+			HERMES_DB: ':memory:'
+		}
+	}
 });
