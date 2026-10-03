@@ -145,16 +145,11 @@ export interface RepoDetail extends RepoSummary {
 	reviews: ReviewSummary[];
 }
 
-export interface TrendPoint {
-	day: string;
-	count: number;
-}
-
 /** A daily aggregate bucket exposed by GET /api/trends. */
 export interface TrendBucket {
-	/** "M/D" label for the day. */
+	/** "M/D" label for the UTC day. */
 	day: string;
-	/** Start-of-day timestamp (local), ms. */
+	/** UTC midnight, epoch-ms. */
 	date: number;
 	/** Findings first introduced on this day. */
 	newFindings: number;
@@ -179,7 +174,8 @@ export interface Overview {
 	lastRunAt: number | null;
 	/** Agent-reported next planned run (epoch-ms), or null if unscheduled. */
 	nextRunAt: number | null;
-	trend: TrendPoint[];
+	/** Daily UTC buckets for the current day and the preceding 13 days. */
+	trend: TrendBucket[];
 	repos: RepoSummary[];
 }
 

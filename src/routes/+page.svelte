@@ -2,6 +2,7 @@
 	import { scan } from '$lib/scan.svelte';
 	import { SEVERITIES, SEV_LABEL, SEV_VAR } from '$lib/format';
 	import SeverityStrip from '$lib/components/SeverityStrip.svelte';
+	import TrendChart from '$lib/components/TrendChart.svelte';
 	import NeedsAttention from '$lib/components/NeedsAttention.svelte';
 	import StatusBar from '$lib/components/StatusBar.svelte';
 	import RepoTable from '$lib/components/RepoTable.svelte';
@@ -46,7 +47,10 @@
 		<p>Security overview · {overview.reposCount} {data.orgLabel} repositories</p>
 	</div>
 
-	<SeverityStrip counts={overview.totals} quietedCount={overview.quietedTotal} />
+	<div class="metrics-row">
+		<SeverityStrip counts={overview.totals} quietedCount={overview.quietedTotal} />
+		<TrendChart buckets={overview.trend} />
+	</div>
 	<NeedsAttention repos={overview.repos} />
 	<StatusBar lastRunAt={overview.lastRunAt} nextRunAt={overview.nextRunAt} avgScanSecs={overview.avgScanSecs} scanState={live} {elapsedLabel} />
 
@@ -86,6 +90,8 @@
 	.title-row { margin-bottom: 18px; }
 	h1 { margin: 0; font-size: 27px; font-weight: 700; letter-spacing: -.01em; }
 	.title-row p { margin: 6px 0 0; font-size: 13px; color: var(--dim); }
+	.metrics-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+	@media (max-width: 800px) { .metrics-row { grid-template-columns: 1fr; } }
 	.filter-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 10px; }
 	.filter-title { display: flex; align-items: baseline; gap: 10px; }
 	h2 { margin: 0; font-size: 18px; font-weight: 600; }
