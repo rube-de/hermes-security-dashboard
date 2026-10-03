@@ -3,7 +3,7 @@ import { listRepoSummaries } from './repos';
 import { getMeta } from './meta';
 import { getTrends } from './trends';
 import { emptyCounts } from '$lib/format';
-import type { Overview, TrendPoint } from '$lib/types';
+import type { Overview } from '$lib/types';
 
 export function getOverview(now = Date.now()): Overview {
 	const repos = listRepoSummaries();
@@ -39,7 +39,7 @@ export function getOverview(now = Date.now()): Overview {
 		avgScanSecs: avgRow.a === null ? null : Math.round(avgRow.a),
 		lastRunAt: lastRow.m,
 		nextRunAt: storedNext > 0 ? storedNext : null,
-		trend: getTrends(14, {}, now).map((b) => ({ day: b.day, count: b.newFindings }) satisfies TrendPoint),
+		trend: getTrends(14, {}, now),
 		repos
 	};
 }

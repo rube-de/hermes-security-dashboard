@@ -156,7 +156,7 @@ Point the sync sidecar at the snapshot file (default `${HERMES_DB}.snapshot`),
 
 | Route                          | What                                                        |
 | ------------------------------ | ---------------------------------------------------------- |
-| `/`                            | Overview — totals by severity, run strip, trend, repo list with search + status/severity filters |
+| `/`                            | Overview — compact severity strip with UTC new/fixed trends, needs attention, scan status, risk-sorted repo table with search + status/severity filters |
 | `/repo/[id]`                   | Repo detail — metric summary, live scan banner, commit-grouped review history with union-based new/fixed changes |
 | `/repo/[id]/review/[reviewId]` | Review report — counted severity filters, findings index and permalinks, summary, diff, expandable findings with source links + remediation, resolved section |
 
@@ -169,6 +169,16 @@ Times are formatted in the browser: absolute times in its local time zone (hover
 one for the full date and zone name), relative ones ("2h 14m ago", "in 3h") on a
 shared 30-second clock, so they stay current without a reload. Server-rendered
 HTML shows UTC times until the page hydrates.
+
+The overview puts repositories with open critical or high findings in **Needs
+attention**. Its repository table (and `GET /api/repos` / the overview's `repos`
+array) defaults to highest open severity, then critical/high issue count, then
+oldest open issue. Column-header buttons change the table sort. **Oldest open**
+uses `RepoSummary.oldestOpenAt`: the earliest first-seen epoch-ms among unresolved
+critical/high issues in the head-commit union, across every model and location.
+False-positive and accepted-risk triage are excluded; acknowledged issues remain
+open. The field is `null` when no open critical/high issues remain. Language tags
+are neutral text so they cannot be confused with severity.
 
 Reports have a sticky findings sidebar, replaced by a top bar below 900px.
 New findings start expanded; carried findings and any finding with a triage
@@ -399,7 +409,7 @@ carry over to them (re-tag the ones that still apply).
 curl 'localhost:3000/api/reviews?since=2026-06-01&limit=500'
 curl 'localhost:3000/api/reviews?repo=sapphire-paratime'
 
-# pre-aggregated daily buckets: new / resolved / reviews per day
+# pre-aggregated UTC daily buckets: new / resolved / reviews per day
 curl 'localhost:3000/api/trends?days=30'
 curl 'localhost:3000/api/trends?days=14&repo=sapphire-paratime'
 ```
@@ -407,6 +417,17 @@ curl 'localhost:3000/api/trends?days=14&repo=sapphire-paratime'
 `GET /api/reviews` accepts `repo`, `since`/`until`, and `limit` (1..1000, default
 200). `GET /api/trends` accepts `days` (1..365, default 14) and optional `repo`;
 each bucket is `{ day, date, newFindings, resolvedFindings, reviews }`.
+Buckets are continuous and zero-filled, oldest first, covering the current UTC day
+and the preceding `days - 1` days. `date` is UTC midnight (epoch-ms), and `day` is
+its UTC `M/D` label; server/browser timezones and DST do not change the grouping.
+`newFindings` counts first-discovered issues and `resolvedFindings` counts recorded
+fixes from review deltas on each review's UTC day. `reviews` includes same-commit
+scans. Later triage does not rewrite these historical deltas.
+
+The overview's `trend` returns the same full buckets as `/api/trends?days=14`.
+Its paired bars show new findings above zero and fixes below zero, labelled
+**days in UTC**. The summary totals each series and reports their difference as
+the 14-day backlog change: `+N new · M fixed · backlog ±K (14d)`.
 
 `since`/`until` take epoch-ms (12+ digits), a 4-digit year (`2024` = Jan 1 2024,
 UTC), or ISO-8601. A 10-digit value is epoch seconds and is rejected with 400

@@ -90,9 +90,12 @@ paths:
       tags: [Repositories]
       operationId: listRepos
       summary: List repository summaries
+      description: >-
+        Sorted by highest open severity, then critical/high issue count, then oldest
+        open critical/high first-seen timestamp. Repository ID breaks remaining ties.
       responses:
         '200':
-          description: All repositories with status from their latest review
+          description: All repositories with status from their head-commit finding union
           content:
             application/json:
               schema:
@@ -484,7 +487,11 @@ paths:
     get:
       tags: [Trends]
       operationId: getTrends
-      summary: Daily new/resolved/review aggregates
+      summary: Daily UTC new/resolved/review aggregates
+      description: >-
+        Includes the current UTC day and the preceding days in the requested span.
+        Buckets run from UTC midnight to the next UTC midnight, independent of the
+        server or browser timezone and daylight-saving transitions.
       parameters:
         - name: days
           in: query
@@ -497,7 +504,7 @@ paths:
           description: Scope to a single repository id
       responses:
         '200':
-          description: Continuous, zero-filled daily buckets (oldest first)
+          description: Continuous, zero-filled UTC daily buckets (oldest first)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TrendsResponse' }
@@ -586,7 +593,7 @@ components:
         introduced one), unioned across all of that commit's scans.
       required:
         [id, lang, description, path, branch, lines, counts, quietedCount, status, clean,
-         scanning, lastRunAt, lastDurationSecs, filesScanned, headCommit, headScanCount]
+         scanning, oldestOpenAt, lastRunAt, lastDurationSecs, filesScanned, headCommit, headScanCount]
       properties:
         id: { type: string }
         lang: { type: string }
@@ -606,6 +613,12 @@ components:
         status: { type: string, enum: [flagged, clean] }
         clean: { type: boolean }
         scanning: { type: boolean }
+        oldestOpenAt:
+          type: [integer, 'null']
+          description: >-
+            Earliest first-seen epoch-ms among unresolved critical/high issues in the
+            head-commit finding union, excluding false-positive and accepted-risk triage.
+            Null when no open critical/high issues remain.
         lastRunAt:
           type: [integer, 'null']
           description: Epoch-ms of the current commit's latest scan, or null if never scanned.
@@ -967,11 +980,17 @@ components:
       type: object
       required: [day, date, newFindings, resolvedFindings, reviews]
       properties:
-        day: { type: string, description: '`M/D` label, e.g. 6/15' }
-        date: { type: integer, description: 'Local midnight, epoch-ms' }
-        newFindings: { type: integer }
-        resolvedFindings: { type: integer }
-        reviews: { type: integer }
+        day: { type: string, description: '`M/D` label for the UTC day, e.g. 6/15' }
+        date: { type: integer, description: 'UTC midnight, epoch-ms' }
+        newFindings:
+          type: integer
+          description: Issues first discovered on reviews created during this UTC day.
+        resolvedFindings:
+          type: integer
+          description: Fixes recorded by new-commit reviews during this UTC day.
+        reviews:
+          type: integer
+          description: All reviews created during this UTC day, including same-commit scans.
 
     TrendsResponse:
       type: object
@@ -982,13 +1001,6 @@ components:
         buckets:
           type: array
           items: { $ref: '#/components/schemas/TrendBucket' }
-
-    TrendPoint:
-      type: object
-      required: [day, count]
-      properties:
-        day: { type: string }
-        count: { type: integer, description: New findings on the day }
 
     Overview:
       type: object
@@ -1015,7 +1027,8 @@ components:
           description: Epoch-ms of the agent's next planned run, or null if unscheduled.
         trend:
           type: array
-          items: { $ref: '#/components/schemas/TrendPoint' }
+          description: Same 14 UTC daily buckets as GET /api/trends?days=14.
+          items: { $ref: '#/components/schemas/TrendBucket' }
         repos:
           type: array
           items: { $ref: '#/components/schemas/RepoSummary' }

@@ -4,7 +4,7 @@ import { readInt } from '$lib/server/params';
 import type { RequestHandler } from './$types';
 
 /**
- * Pre-aggregated daily trend buckets (continuous, zero-filled), newest day last.
+ * Pre-aggregated daily UTC trend buckets (continuous, zero-filled), newest day last.
  *
  *   GET /api/trends?days=<1..365>&repo=<id>
  *

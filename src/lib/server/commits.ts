@@ -34,6 +34,7 @@ export interface UnionFinding {
 	severity: Severity;
 	title: string;
 	file: string;
+	firstSeenAt: number;
 }
 
 /**
@@ -49,11 +50,12 @@ export interface UnionFinding {
 export function unionFindingsForCommit(repoId: string, commit: string): UnionFinding[] {
 	const rows = db
 		.prepare(
-			`SELECT f.fingerprint AS fingerprint, f.severity AS severity, f.title AS title, f.file AS file
+			`SELECT f.fingerprint AS fingerprint, f.severity AS severity, f.title AS title, f.file AS file,
+			        MIN(f.first_seen_at) OVER (PARTITION BY f.fingerprint) AS firstSeenAt
 			   FROM findings f JOIN reviews r ON f.review_id = r.id
 			  WHERE r.repo_id = ? AND r.commit_hash = ?`
 		)
-		.all(repoId, commit) as { fingerprint: string; severity: Severity; title: string; file: string }[];
+		.all(repoId, commit) as UnionFinding[];
 	return worstPerIssue(rows);
 }
 
