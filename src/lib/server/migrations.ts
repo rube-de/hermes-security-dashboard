@@ -15,6 +15,36 @@ import { contentHash } from './content-hash';
  * migration; it has already run on deployed databases.
  */
 
+/** Bump `meta.data_version` by one (inserting it at 1 when missing). */
+const BUMP_DATA_VERSION = `INSERT INTO meta (key, value) VALUES ('data_version', '1')
+    ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);`;
+
+/**
+ * `meta.data_version`: a counter the client polls (via `/api/scan`) to know when to
+ * reload page data. Bumped by triggers on every write the UI renders, so no write path
+ * can forget it. Scan rows bump only on start/stop/target changes: progress ticks would
+ * otherwise reload every open page on every poll. Shared by {@link SCHEMA} and
+ * migration 3; changing it requires a new migration.
+ */
+const DATA_VERSION_SQL = `
+INSERT INTO meta (key, value) VALUES ('data_version', '1') ON CONFLICT(key) DO NOTHING;
+${['repos', 'reviews', 'finding_triage']
+	.flatMap((table) =>
+		['INSERT', 'UPDATE', 'DELETE'].map(
+			(op) =>
+				`CREATE TRIGGER trg_${table}_bump_${op.toLowerCase()} AFTER ${op} ON ${table} BEGIN
+    ${BUMP_DATA_VERSION}
+END;`
+		)
+	)
+	.join('\n')}
+CREATE TRIGGER trg_scan_bump_upd AFTER UPDATE OF active, repo_id, commit_hash ON scan
+WHEN OLD.active IS NOT NEW.active OR OLD.repo_id IS NOT NEW.repo_id OR OLD.commit_hash IS NOT NEW.commit_hash
+BEGIN
+    ${BUMP_DATA_VERSION}
+END;
+`;
+
 /** Latest schema, applied as-is to a fresh database. */
 export const SCHEMA = `
 CREATE TABLE repos (
@@ -114,51 +144,7 @@ CREATE TABLE meta (
   value TEXT NOT NULL
 );
 
-CREATE TRIGGER trg_repos_bump_ins AFTER INSERT ON repos BEGIN
-  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-END;
-CREATE TRIGGER trg_repos_bump_upd AFTER UPDATE ON repos BEGIN
-  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-END;
-CREATE TRIGGER trg_repos_bump_del AFTER DELETE ON repos BEGIN
-  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-END;
-
-CREATE TRIGGER trg_reviews_bump_ins AFTER INSERT ON reviews BEGIN
-  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-END;
-CREATE TRIGGER trg_reviews_bump_upd AFTER UPDATE ON reviews BEGIN
-  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-END;
-CREATE TRIGGER trg_reviews_bump_del AFTER DELETE ON reviews BEGIN
-  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-END;
-
-CREATE TRIGGER trg_triage_bump_ins AFTER INSERT ON finding_triage BEGIN
-  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-END;
-CREATE TRIGGER trg_triage_bump_upd AFTER UPDATE ON finding_triage BEGIN
-  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-END;
-CREATE TRIGGER trg_triage_bump_del AFTER DELETE ON finding_triage BEGIN
-  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-END;
-
-CREATE TRIGGER trg_scan_bump_upd AFTER UPDATE OF active, repo_id, commit_hash ON scan
-WHEN (OLD.active IS NOT NEW.active OR OLD.repo_id IS NOT NEW.repo_id OR OLD.commit_hash IS NOT NEW.commit_hash)
-BEGIN
-  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-END;
+${DATA_VERSION_SQL}
 `;
 
 type Migration = (db: DatabaseSync) => void;
@@ -179,59 +165,8 @@ export const MIGRATIONS: readonly Migration[] = [
 			CREATE INDEX idx_reviews_created ON reviews(created_at);
 		`);
 	},
-	// 3: live data_version counter triggers for repos, reviews, finding_triage, and scan state changes.
-	(db) => {
-		db.exec(`
-			INSERT INTO meta (key, value) VALUES ('data_version', '1')
-			ON CONFLICT(key) DO NOTHING;
-
-			CREATE TRIGGER trg_repos_bump_ins AFTER INSERT ON repos BEGIN
-			  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-			  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-			END;
-			CREATE TRIGGER trg_repos_bump_upd AFTER UPDATE ON repos BEGIN
-			  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-			  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-			END;
-			CREATE TRIGGER trg_repos_bump_del AFTER DELETE ON repos BEGIN
-			  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-			  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-			END;
-
-			CREATE TRIGGER trg_reviews_bump_ins AFTER INSERT ON reviews BEGIN
-			  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-			  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-			END;
-			CREATE TRIGGER trg_reviews_bump_upd AFTER UPDATE ON reviews BEGIN
-			  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-			  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-			END;
-			CREATE TRIGGER trg_reviews_bump_del AFTER DELETE ON reviews BEGIN
-			  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-			  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-			END;
-
-			CREATE TRIGGER trg_triage_bump_ins AFTER INSERT ON finding_triage BEGIN
-			  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-			  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-			END;
-			CREATE TRIGGER trg_triage_bump_upd AFTER UPDATE ON finding_triage BEGIN
-			  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-			  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-			END;
-			CREATE TRIGGER trg_triage_bump_del AFTER DELETE ON finding_triage BEGIN
-			  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-			  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-			END;
-
-			CREATE TRIGGER trg_scan_bump_upd AFTER UPDATE OF active, repo_id, commit_hash ON scan
-			WHEN (OLD.active IS NOT NEW.active OR OLD.repo_id IS NOT NEW.repo_id OR OLD.commit_hash IS NOT NEW.commit_hash)
-			BEGIN
-			  INSERT INTO meta (key, value) VALUES ('data_version', '1')
-			  ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT);
-			END;
-		`);
-	}
+	// 3: live `meta.data_version` counter.
+	(db) => db.exec(DATA_VERSION_SQL)
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length;

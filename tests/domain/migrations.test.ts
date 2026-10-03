@@ -6,7 +6,7 @@ function userVersion(db: DatabaseSync): number {
 	return Number(db.prepare('PRAGMA user_version').get()?.user_version);
 }
 
-/** Table → sorted column names, plus sorted index names: the shape fresh and migrated DBs must share. */
+/** Table → sorted column names, plus sorted index and trigger names: the shape fresh and migrated DBs must share. */
 function shape(db: DatabaseSync) {
 	const tables = db
 		.prepare(
@@ -24,13 +24,14 @@ function shape(db: DatabaseSync) {
 				.sort()
 		])
 	);
-	const indexes = db
-		.prepare(
-			"SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-		)
-		.all()
-		.map((r) => String(r.name));
-	return { tables, columns, indexes };
+	const named = (type: string) =>
+		db
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type = ? AND name NOT LIKE 'sqlite_%' ORDER BY name"
+			)
+			.all(type)
+			.map((r) => String(r.name));
+	return { tables, columns, indexes: named('index'), triggers: named('trigger') };
 }
 
 /** The earliest release: no model/content_hash columns, no dedup index, no triage table. */
@@ -84,6 +85,16 @@ describe('migrate', () => {
 			'reviews',
 			'scan'
 		]);
+	});
+
+	it('bumps data_version on the first write to a fresh database', () => {
+		const db = new DatabaseSync(':memory:');
+		migrate(db);
+		const version = () =>
+			Number(db.prepare("SELECT value FROM meta WHERE key = 'data_version'").get()?.value);
+		const before = version();
+		db.prepare("INSERT INTO repos (id, lang, created_at) VALUES ('r1', 'Solidity', 0)").run();
+		expect(version()).toBe(before + 1);
 	});
 
 	it('migrates the earliest release onto the same shape as a fresh database', () => {
