@@ -155,11 +155,16 @@ function resolvedToInput(r: { sev: Severity; title: string; file: string; line: 
 	};
 }
 
-export function seedIfEmpty(): void {
-	// Demo seeding is on by default (preserves dev / prototype behavior). Production
-	// sets HERMES_SEED_DEMO=false so the dashboard starts empty until the agent
-	// pushes real findings.
-	if (['false', '0', 'no', 'off'].includes((process.env.HERMES_SEED_DEMO ?? '').toLowerCase())) {
+export function seedIfEmpty(isDev = false): void {
+	// Demo seeding runs only in development (e.g. vite dev) or when explicitly
+	// enabled via HERMES_SEED_DEMO=true. Production default is empty until the
+	// agent pushes real findings.
+	const envVal = (process.env.HERMES_SEED_DEMO ?? '').toLowerCase();
+	const explicitlyEnabled = ['true', '1', 'yes', 'on'].includes(envVal);
+	const explicitlyDisabled = ['false', '0', 'no', 'off'].includes(envVal);
+
+	const shouldSeed = explicitlyEnabled || (isDev && !explicitlyDisabled);
+	if (!shouldSeed) {
 		return;
 	}
 

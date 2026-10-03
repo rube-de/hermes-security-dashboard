@@ -147,7 +147,7 @@ Point the sync sidecar at the snapshot file (default `${HERMES_DB}.snapshot`),
 | `HERMES_DB` | `hermes.db` (`/data/hermes.db` in Docker) | Live SQLite path |
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | adapter-node bind |
 | `HERMES_API_TOKEN` | _unset_ | Bearer auth for writes; unset = open (loud startup warning in production) |
-| `HERMES_SEED_DEMO` | `true` | Seed demo data on an empty DB; set `false` in production to start empty |
+| `HERMES_SEED_DEMO` | `false` (prod) / `true` (dev) | Seed demo data on an empty DB; in dev on by default, set `true` in production to seed |
 | `HERMES_DB_SNAPSHOT` | `${HERMES_DB}.snapshot` | Snapshot file the sync layer copies |
 | `HERMES_SNAPSHOT_INTERVAL` | `300` | Seconds between snapshot/checkpoint cycles |
 | `BASE_PATH` | `''` | Sub-path prefix — **build arg**, baked at build time |
@@ -206,6 +206,8 @@ curl -X POST http://hermes-security-dashboard:3000/security/api/repos/:id/review
 | GET    | `/api/repos/:id`             | Repo detail + review history           |
 | GET    | `/api/repos/:id/reviews`     | Reviews for a repo                     |
 | POST   | `/api/repos/:id/reviews`     | **Submit a review report**             |
+| GET    | `/api/repos/:id/rerun`       | Check re-run request state (not consumed) |
+| POST   | `/api/repos/:id/rerun`       | Record re-run request (not consumed)   |
 | GET    | `/api/reviews`               | List reviews across repos (trend source) |
 | GET    | `/api/reviews/:id`           | Single review (findings + diff)        |
 | GET    | `/api/trends`                | Daily new/resolved/review aggregates   |
@@ -313,6 +315,11 @@ curl -X PUT localhost:3000/api/scan -H 'content-type: application/json' -d '{
 # clear when finished
 curl -X PUT localhost:3000/api/scan -H 'content-type: application/json' -d '{ "active": false }'
 ```
+
+
+### Re-run requests
+
+The endpoints `GET /api/repos/:id/rerun` and `POST /api/repos/:id/rerun` record and inspect re-run requests. Note that requests are never cleared and are currently not consumed by the agent.
 
 ## Data model
 

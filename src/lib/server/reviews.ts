@@ -4,7 +4,7 @@ import { countsForReview } from './commits';
 import { triageMapForRepo, quiets } from './triage';
 import { fingerprint } from './fingerprint';
 import { fmtAgo, fmtDate, fmtDur, SEVERITIES, countSeverities } from '$lib/format';
-import type { Finding, ResolvedFinding, ReviewDetail, ReviewSummary } from '$lib/types';
+import type { Finding, ResolvedFinding, ReviewDetail, ReviewSummary, SeverityCounts } from '$lib/types';
 
 // SQL severity ordering, derived from SEVERITIES so it can't drift from SEV_RANK.
 // SEVERITIES holds only fixed internal keys, so interpolation here is injection-safe.
@@ -20,8 +20,8 @@ export function findReviewByHash(repoId: string, hash: string): string | null {
 	return row?.id ?? null;
 }
 
-export function reviewSummary(rv: ReviewRow, now: number): ReviewSummary {
-	const counts = countsForReview(rv.id);
+export function reviewSummary(rv: ReviewRow, now: number, precomputedCounts?: SeverityCounts): ReviewSummary {
+	const counts = precomputedCounts ?? countsForReview(rv.id);
 	return {
 		id: rv.id,
 		repoId: rv.repo_id,
@@ -137,10 +137,9 @@ export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetai
 	// A dismissed finding the agent later stops reporting must not read as a "fix".
 	resolved = resolved.filter((rf) => !quiets(triage.get(fingerprint(rf.file, rf.title))));
 
-	const summary = reviewSummary(rv, now);
+	const summary = reviewSummary(rv, now, counts);
 	return {
 		...summary,
-		counts,
 		quietedCount,
 		engine: rv.engine,
 		summary: rv.summary,

@@ -14,6 +14,7 @@ import { GET as getOpenApi } from '../../src/routes/api/openapi.json/+server';
 import { addRepo } from '$lib/server/repos';
 import { insertReview } from '$lib/server/ingest';
 import { requestRerun } from '$lib/server/meta';
+import { db } from '$lib/server/db';
 import { resetDb, callApi } from '../test-utils';
 import type { Overview, RepoDetail, RepoSummary, ReviewDetail, ReviewSummary, ScanState, TrendBucket } from '$lib/types';
 
@@ -239,12 +240,31 @@ describe('API Read Endpoints', () => {
 	});
 
 	describe('GET /api/health', () => {
-		// KNOWN-WRONG (H1, fixed by T07): /api/health returns static 200 without checking DB
-		it('returns 200 static response (KNOWN-WRONG: H1)', async () => {
+		it('returns 200 when database is healthy', async () => {
 			const res = await callApi<HealthResponse>(getHealth);
 			expect(res.status).toBe(200);
 			expect(res.body.ok).toBe(true);
 			expect(res.body.service).toBe('hermes-security-dashboard');
+		});
+
+		it('returns 503 when database throws on query', async () => {
+			const originalPrepare = db.prepare;
+			db.prepare = ((sql: string) => {
+				if (sql.includes('SELECT 1')) {
+					throw new Error('database disk I/O error');
+				}
+				return originalPrepare.call(db, sql);
+			}) as typeof db.prepare;
+
+			try {
+				const res = await callApi<{ ok: boolean; service: string; error?: string }>(getHealth);
+				expect(res.status).toBe(503);
+				expect(res.body.ok).toBe(false);
+				expect(res.body.service).toBe('hermes-security-dashboard');
+				expect(res.body.error).toContain('database disk I/O error');
+			} finally {
+				db.prepare = originalPrepare;
+			}
 		});
 	});
 
