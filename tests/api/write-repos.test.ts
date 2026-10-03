@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { POST as createRepo } from '../../src/routes/api/repos/+server';
 import { POST as requestRerun } from '../../src/routes/api/repos/[id]/rerun/+server';
 import { PUT as updateTriage } from '../../src/routes/api/repos/[id]/findings/[fingerprint]/triage/+server';
-import { addRepo } from '$lib/server/repos';
+import { addRepo, repoExists } from '$lib/server/repos';
 import { insertReview } from '$lib/server/ingest';
 import { fingerprint } from '$lib/server/fingerprint';
 import { resetDb, callApi } from '../test-utils';
@@ -102,14 +102,56 @@ describe('POST /api/repos', () => {
 		expect(res.body.lang).toBe('Rust');
 	});
 
-	// KNOWN-WRONG (I1, fixed by T06): POST /api/repos allows any id string (e.g. spaces/slashes); T06 will enforce ^[A-Za-z0-9._-]{1,100}$
-	it('allows arbitrary id characters without regex validation (KNOWN-WRONG: I1)', async () => {
+	it('returns 400 for a new id that is not a single URL-safe segment (I1)', async () => {
+		const bad = ['repo with spaces', 'org/repo', '.', '..', 'naïve', 'x'.repeat(101)];
+		for (const id of bad) {
+			const res = await callApi<ErrorResponse>(createRepo, {
+				method: 'POST',
+				body: { id, lang: 'TypeScript' }
+			});
+			expect(res.status).toBe(400);
+			expect(res.body.error).toContain('`id` must match');
+			expect(repoExists(id)).toBe(false);
+		}
+	});
+
+	it('accepts new ids at the edges of the allowed shape', async () => {
+		for (const id of ['a', 'Oasis.SDK_v2-rc', '...', 'x'.repeat(100)]) {
+			const res = await callApi<RepoResponse>(createRepo, {
+				method: 'POST',
+				body: { id, lang: 'Go' }
+			});
+			expect(res.status).toBe(201);
+			expect(res.body.id).toBe(id);
+		}
+	});
+
+	it('still updates a repo whose id predates the id rule', async () => {
+		addRepo({ id: 'legacy repo/id', lang: 'Go' });
 		const res = await callApi<RepoResponse>(createRepo, {
 			method: 'POST',
-			body: { id: 'repo with spaces and / slashes', lang: 'TypeScript' }
+			body: { id: 'legacy repo/id', lang: 'Rust' }
 		});
 		expect(res.status).toBe(201);
-		expect(res.body.id).toBe('repo with spaces and / slashes');
+		expect(res.body.lang).toBe('Rust');
+	});
+
+	it('returns 400 when lines is not a non-negative integer', async () => {
+		for (const lines of [12.5, -1, '100']) {
+			const res = await callApi<ErrorResponse>(createRepo, {
+				method: 'POST',
+				body: { id: 'repo-lines', lang: 'Go', lines }
+			});
+			expect(res.status).toBe(400);
+			expect(res.body.error).toBe('`lines` must be a non-negative integer');
+		}
+		expect(repoExists('repo-lines')).toBe(false);
+	});
+
+	it('returns 400 when the JSON body is not an object', async () => {
+		const res = await callApi<ErrorResponse>(createRepo, { method: 'POST', body: null });
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe('JSON body must be an object');
 	});
 });
 

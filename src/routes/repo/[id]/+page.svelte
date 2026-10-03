@@ -112,7 +112,7 @@
 					<div class="mono rdate">{rv.dateLabel}</div>
 					<div class="mono rcommit">{rv.commit}</div>
 					<div class="mono rmodel">{rv.model || '—'}</div>
-					<div class="rtrigger">{rv.trigger}</div>
+					<div class="rtrigger">{rv.trigger || '—'}</div>
 					<div class="rfind">
 						<SeverityPills counts={rv.counts} cleanLabel="✓ clean" />
 						{#if rv.hasDelta}

@@ -98,7 +98,18 @@ export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetai
 	// Human triage verdicts for this repo, joined onto findings by fingerprint below.
 	const triage = triageMapForRepo(rv.repo_id);
 
-	const findings: Finding[] = rows.map((f) => {
+	// Rows are locations; an issue is every row sharing an identity (`fingerprint`). Rows
+	// arrive most severe first, then in insertion order, so each issue's first row is its
+	// primary location and the issues come out in severity order.
+	const byIssue = new Map<string, FindingRow[]>();
+	for (const r of rows) {
+		const locs = byIssue.get(r.fingerprint);
+		if (locs) locs.push(r);
+		else byIssue.set(r.fingerprint, [r]);
+	}
+
+	const findings: Finding[] = [...byIssue.values()].map((locs) => {
+		const f = locs[0];
 		const ageHours = Math.max(0, (rv.created_at - f.first_seen_at) / 3_600_000);
 		const openRuns = Math.max(
 			1,
@@ -115,7 +126,12 @@ export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetai
 			description: f.description,
 			code: f.code,
 			recommendation: f.recommendation,
-			isNew: f.is_new === 1,
+			ruleId: f.rule_id,
+			locationKey: f.location_key,
+			locations: locs
+				.map((l) => ({ file: l.file, line: l.line, locationKey: l.location_key }))
+				.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line),
+			isNew: locs.some((l) => l.is_new === 1),
 			openRuns,
 			ageHours: Math.round(ageHours),
 			fingerprint: f.fingerprint,
@@ -123,25 +139,30 @@ export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetai
 		};
 	});
 
-	// Quiet dismissed findings from the band counts — they remain in `findings` (dimmed),
+	// Quiet dismissed issues from the band counts — they remain in `findings` (dimmed),
 	// just don't tally toward the severity totals shown above the list.
-	const openRows = rows.filter((f) => !quiets(triage.get(f.fingerprint)));
-	const counts = countSeverities(openRows);
-	const quietedCount = rows.length - openRows.length;
-	let resolved: ResolvedFinding[] = [];
+	const open = findings.filter((f) => !quiets(f.triage));
+	const counts = countSeverities(open);
+	const quietedCount = findings.length - open.length;
+	let stored: (Omit<ResolvedFinding, 'fingerprint'> & { fingerprint?: string })[] = [];
 	try {
-		resolved = JSON.parse(rv.resolved_json) as ResolvedFinding[];
+		stored = JSON.parse(rv.resolved_json);
 	} catch {
-		resolved = [];
+		stored = [];
 	}
-	// A dismissed finding the agent later stops reporting must not read as a "fix".
-	resolved = resolved.filter((rf) => !quiets(triage.get(fingerprint(rf.file, rf.title))));
+	// Entries written before identities were stored lack `fingerprint`; every finding was
+	// keyed on the legacy file+title fingerprint then. A dismissed finding the agent later
+	// stops reporting must not read as a "fix".
+	const resolved: ResolvedFinding[] = stored
+		.map((rf) => ({ ...rf, fingerprint: rf.fingerprint ?? fingerprint(rf.file, rf.title) }))
+		.filter((rf) => !quiets(triage.get(rf.fingerprint)));
 
 	const summary = reviewSummary(rv, now, counts);
 	return {
 		...summary,
 		quietedCount,
 		engine: rv.engine,
+		agentVersion: rv.agent_version,
 		summary: rv.summary,
 		lines: rv.lines,
 		filesScanned: rv.files_scanned,

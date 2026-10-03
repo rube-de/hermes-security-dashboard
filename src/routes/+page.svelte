@@ -91,7 +91,7 @@
 <main>
 	<div class="title-row">
 		<div>
-			<div class="eyebrow mono">Security Overview · Metric Grid</div>
+			<div class="eyebrow mono">Security Overview</div>
 			<h1 class="display">Repository Review Status</h1>
 			<p class="lede">
 				Hermes scans <strong>{o.reposCount}</strong>
