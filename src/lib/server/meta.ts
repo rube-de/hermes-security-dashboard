@@ -22,6 +22,14 @@ export function setNextRun(at: number | null): void {
 	setMeta('next_run_at', String(at && at > 0 ? at : 0));
 }
 
+/** Monotonic counter bumped by SQLite triggers on any DB write. */
+export function getDataVersion(): number {
+	const row = db.prepare("SELECT value FROM meta WHERE key = 'data_version'").get() as
+		| { value: string }
+		| undefined;
+	return row ? Number(row.value) : 1;
+}
+
 /* ------------------------------------------------------------------ */
 /* re-run requests (user asks; the agent picks them up next cycle)     */
 /* ------------------------------------------------------------------ */

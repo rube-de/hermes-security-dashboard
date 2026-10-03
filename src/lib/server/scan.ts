@@ -1,4 +1,5 @@
 import { db } from './db';
+import { getDataVersion } from './meta';
 import type { ScanState } from '$lib/types';
 
 export interface ScanRow {
@@ -13,6 +14,7 @@ export interface ScanRow {
 }
 
 export function getScan(): ScanState {
+	const dataVersion = getDataVersion();
 	const r = db.prepare('SELECT * FROM scan WHERE id = 1').get() as ScanRow | undefined;
 	if (!r || r.active !== 1) {
 		return {
@@ -22,7 +24,8 @@ export function getScan(): ScanState {
 			currentFile: null,
 			progress: 0,
 			engine: null,
-			startedAt: null
+			startedAt: null,
+			dataVersion
 		};
 	}
 	return {
@@ -32,7 +35,8 @@ export function getScan(): ScanState {
 		currentFile: r.current_file,
 		progress: r.progress,
 		engine: r.engine,
-		startedAt: r.started_at
+		startedAt: r.started_at,
+		dataVersion
 	};
 }
 

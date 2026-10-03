@@ -765,7 +765,7 @@ components:
     ScanState:
       type: object
       description: Singleton live active-run state.
-      required: [active, progress]
+      required: [active, progress, dataVersion]
       properties:
         active: { type: boolean }
         repoId: { type: [string, 'null'] }
@@ -774,7 +774,7 @@ components:
         progress: { type: number, description: 0–100 }
         engine: { type: [string, 'null'] }
         startedAt: { type: [integer, 'null'], description: Epoch-ms }
-
+        dataVersion: { type: integer, description: Monotonic counter bumped by DB writes }
     ScanUpdate:
       type: object
       required: [active]

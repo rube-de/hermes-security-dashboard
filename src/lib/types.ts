@@ -168,4 +168,5 @@ export interface ScanState {
 	progress: number;
 	engine: string | null;
 	startedAt: number | null;
+	dataVersion: number;
 }

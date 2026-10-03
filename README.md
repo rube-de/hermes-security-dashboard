@@ -161,8 +161,9 @@ Point the sync sidecar at the snapshot file (default `${HERMES_DB}.snapshot`),
 | `/repo/[id]/review/[reviewId]` | Review report — severity band, summary, diff vs previous run, findings with code + remediation, resolved section |
 
 UI pages read directly from the database via server `load`. The active-run
-banner additionally polls `GET /api/scan` so the agent's progress shows live.
-
+banner polls `GET /api/scan`, which returns the live scan state along with
+`dataVersion`. The client polls using a backoff-aware timer chain, pauses when
+hidden, and triggers `invalidateAll()` whenever `dataVersion` advances.
 ## Agent API
 
 A machine-readable **OpenAPI 3.1** spec lives at
@@ -208,7 +209,7 @@ curl -X POST http://hermes-security-dashboard:3000/security/api/repos/:id/review
 | GET    | `/api/reviews`               | List reviews across repos (trend source) |
 | GET    | `/api/reviews/:id`           | Single review (findings + diff)        |
 | GET    | `/api/trends`                | Daily new/resolved/review aggregates   |
-| GET    | `/api/scan`                  | Current active-run state               |
+| GET    | `/api/scan`                  | Current active-run state + dataVersion |
 | PUT    | `/api/scan`                  | Update active-run state                |
 
 ### Register a repo
@@ -316,8 +317,9 @@ curl -X PUT localhost:3000/api/scan -H 'content-type: application/json' -d '{ "a
 ## Data model
 
 `node:sqlite` tables: `repos`, `reviews`, `findings`, `scan` (singleton live
-run), `meta` (next run, org label, etc.). Findings carry a stable `fingerprint`
-(`file` + `title`) so the same issue is tracked run-over-run — that's what powers
-the new/carried/resolved diff and per-finding age ("open N runs"). Server data
+run), `meta` (`data_version`, next run, org label, etc.). SQLite triggers increment
+`meta.data_version` on every write (repo, review, triage, or scan state transition).
+Findings carry a stable `fingerprint` (`file` + `title`) so the same issue is tracked
+run-over-run — that's what powers the new/carried/resolved diff and per-finding age ("open N runs").
 access lives in `src/lib/server/` (`db.ts`, `store.ts`, `seed.ts`,
 `sanitize.ts`, `auth.ts`).

@@ -209,11 +209,12 @@ describe('API Read Endpoints', () => {
 	});
 
 	describe('GET /api/scan', () => {
-		it('returns 200 with scan state shape', async () => {
+		it('returns 200 with scan state shape including dataVersion', async () => {
 			const res = await callApi<ScanState>(getScan);
 			expect(res.status).toBe(200);
 			expect(typeof res.body.active).toBe('boolean');
 			expect(typeof res.body.progress).toBe('number');
+			expect(typeof res.body.dataVersion).toBe('number');
 		});
 	});
 
