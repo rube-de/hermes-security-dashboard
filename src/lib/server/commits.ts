@@ -47,8 +47,8 @@ export function unionFindingsForCommit(repoId: string, commit: string): UnionFin
 	return [...byFp.values()];
 }
 
-/** Newest scan of a specific commit. Drives the repo card's "last scan" labels (so
- *  they describe the same commit the headline counts come from). rowid DESC breaks
+/** Newest scan of a specific commit. Drives the repo's `lastRunAt` / `lastDurationSecs`
+ *  (so they describe the same commit the headline counts come from). rowid DESC breaks
  *  created_at ties deterministically. */
 export function latestReviewRowForCommit(repoId: string, commit: string): ReviewRow | undefined {
 	return db

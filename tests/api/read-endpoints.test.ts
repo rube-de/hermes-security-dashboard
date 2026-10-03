@@ -13,7 +13,7 @@ import { GET as getOpenApi } from '../../src/routes/api/openapi.json/+server';
 
 import { addRepo } from '$lib/server/repos';
 import { insertReview } from '$lib/server/ingest';
-import { requestRerun } from '$lib/server/meta';
+import { requestRerun, setNextRun } from '$lib/server/meta';
 import { db } from '$lib/server/db';
 import { resetDb, callApi } from '../test-utils';
 import type { Overview, RepoDetail, RepoSummary, ReviewDetail, ReviewSummary, ScanState, TrendBucket } from '$lib/types';
@@ -50,6 +50,19 @@ interface OpenApiResponse {
 	paths: Record<string, unknown>;
 }
 
+const T0 = Date.UTC(2026, 5, 16, 9, 46, 12);
+const HOUR = 3_600_000;
+
+// Display strings the API no longer returns (decision #13): it sends raw epoch-ms
+// timestamps and second counts, and the client formats them.
+const REMOVED_OVERVIEW_FIELDS = ['avgScanLabel', 'orgLabel', 'lastRunLabel', 'nextRunLabel'];
+const REMOVED_REPO_FIELDS = ['langColor', 'statusLabel', 'glyph', 'lastRunLabel', 'lastDurationLabel'];
+const REMOVED_REVIEW_FIELDS = ['dateLabel', 'agoLabel', 'durationLabel'];
+
+function expectNoFields(body: object, fields: string[]) {
+	for (const f of fields) expect(body, `removed field "${f}" is back`).not.toHaveProperty(f);
+}
+
 describe('API Read Endpoints', () => {
 	const repoId = 'oasis-core';
 	let reviewId = '';
@@ -59,6 +72,8 @@ describe('API Read Endpoints', () => {
 		addRepo({ id: repoId, lang: 'Rust', description: 'Core consensus' });
 		const res = insertReview(repoId, {
 			commit: 'c001',
+			createdAt: T0,
+			durationSecs: 231,
 			findings: [{ severity: 'high', file: 'src/main.rs', title: 'Buffer overflow' }]
 		});
 		reviewId = res.id;
@@ -76,6 +91,45 @@ describe('API Read Endpoints', () => {
 			expect(Array.isArray(res.body.trend)).toBe(true);
 			expect(Array.isArray(res.body.repos)).toBe(true);
 		});
+
+		it('returns raw run times and durations instead of display labels', async () => {
+			setNextRun(T0 + 6 * HOUR);
+			const res = await callApi<Overview>(getOverview);
+			expect(res.body.lastRunAt).toBe(T0);
+			expect(res.body.avgScanSecs).toBe(231);
+			expect(res.body.nextRunAt).toBe(T0 + 6 * HOUR);
+			expectNoFields(res.body, REMOVED_OVERVIEW_FIELDS);
+			expectNoFields(res.body.repos[0], REMOVED_REPO_FIELDS);
+		});
+
+		it('returns null run fields before any review, and the mean duration in whole seconds', async () => {
+			resetDb();
+			addRepo({ id: repoId, lang: 'Rust' });
+			const empty = await callApi<Overview>(getOverview);
+			expect(empty.body.lastRunAt).toBeNull();
+			expect(empty.body.avgScanSecs).toBeNull();
+			expect(empty.body.nextRunAt).toBeNull();
+			expect(empty.body.repos[0].lastRunAt).toBeNull();
+			expect(empty.body.repos[0].lastDurationSecs).toBeNull();
+
+			insertReview(repoId, { commit: 'c001', createdAt: T0, durationSecs: 100 });
+			insertReview(repoId, { commit: 'c002', createdAt: T0 + HOUR, durationSecs: 101 });
+			const res = await callApi<Overview>(getOverview);
+			expect(res.body.avgScanSecs).toBe(101); // mean 100.5 rounds to whole seconds
+			expect(res.body.lastRunAt).toBe(T0 + HOUR);
+		});
+
+		it("times a repo's last run by its head commit, the overview by its newest review", async () => {
+			insertReview(repoId, { commit: 'c002', createdAt: T0 + HOUR, durationSecs: 90 });
+			// A later re-scan of the older commit (another model) is newer activity, but not
+			// the repo's current code state.
+			insertReview(repoId, { commit: 'c001', model: 'gpt-5', createdAt: T0 + 2 * HOUR, durationSecs: 60 });
+			const res = await callApi<Overview>(getOverview);
+			expect(res.body.lastRunAt).toBe(T0 + 2 * HOUR);
+			expect(res.body.repos[0].headCommit).toBe('c002');
+			expect(res.body.repos[0].lastRunAt).toBe(T0 + HOUR);
+			expect(res.body.repos[0].lastDurationSecs).toBe(90);
+		});
 	});
 
 	describe('GET /api/repos', () => {
@@ -87,6 +141,9 @@ describe('API Read Endpoints', () => {
 			expect(res.body[0].id).toBe(repoId);
 			expect(res.body[0].lang).toBe('Rust');
 			expect(res.body[0].counts.high).toBe(1);
+			expect(res.body[0].lastRunAt).toBe(T0);
+			expect(res.body[0].lastDurationSecs).toBe(231);
+			expectNoFields(res.body[0], REMOVED_REPO_FIELDS);
 		});
 	});
 
@@ -107,6 +164,12 @@ describe('API Read Endpoints', () => {
 			expect(res.body.id).toBe(repoId);
 			expect(Array.isArray(res.body.reviews)).toBe(true);
 			expect(res.body.reviews).toHaveLength(1);
+			expect(res.body.lastRunAt).toBe(T0);
+			expect(res.body.lastDurationSecs).toBe(231);
+			expectNoFields(res.body, REMOVED_REPO_FIELDS);
+			expect(res.body.reviews[0].createdAt).toBe(T0);
+			expect(res.body.reviews[0].durationSecs).toBe(231);
+			expectNoFields(res.body.reviews[0], REMOVED_REVIEW_FIELDS);
 		});
 	});
 
@@ -127,6 +190,9 @@ describe('API Read Endpoints', () => {
 			expect(Array.isArray(res.body)).toBe(true);
 			expect(res.body).toHaveLength(1);
 			expect(res.body[0].commit).toBe('c001');
+			expect(res.body[0].createdAt).toBe(T0);
+			expect(res.body[0].durationSecs).toBe(231);
+			expectNoFields(res.body[0], REMOVED_REVIEW_FIELDS);
 		});
 	});
 
@@ -166,6 +232,9 @@ describe('API Read Endpoints', () => {
 			expect(res.status).toBe(200);
 			expect(res.body.count).toBe(1);
 			expect(res.body.reviews).toHaveLength(1);
+			expect(res.body.reviews[0].createdAt).toBe(T0);
+			expect(res.body.reviews[0].durationSecs).toBe(231);
+			expectNoFields(res.body.reviews[0], REMOVED_REVIEW_FIELDS);
 		});
 
 		it('returns 400 when query params are invalid', async () => {
@@ -206,6 +275,9 @@ describe('API Read Endpoints', () => {
 			expect(Array.isArray(res.body.findings)).toBe(true);
 			expect(res.body.findings).toHaveLength(1);
 			expect(res.body.diff).toBeDefined();
+			expect(res.body.createdAt).toBe(T0);
+			expect(res.body.durationSecs).toBe(231);
+			expectNoFields(res.body, REMOVED_REVIEW_FIELDS);
 		});
 	});
 

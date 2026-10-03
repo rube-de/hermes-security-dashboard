@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { SEV_LABEL, SEV_VAR, SEV_BG_VAR, TRIAGE_LABEL, countSeverities, quiets, fmtAgo, fmtDate } from '$lib/format';
+	import { SEV_LABEL, SEV_VAR, SEV_BG_VAR, TRIAGE_LABEL, countSeverities, quiets, fmtDur } from '$lib/format';
 	import FindingTriage from '$lib/components/FindingTriage.svelte';
+	import Time from '$lib/components/Time.svelte';
 	import type { Triage } from '$lib/types';
 	import type { PageData } from './$types';
 
@@ -60,8 +61,8 @@
 				<span><span class="k">repository</span> {repo.path}</span>
 				<span><span class="k">commit</span> <span class="commit">{review.commit}</span></span>
 				{#if review.model}<span><span class="k">model</span> {review.model}</span>{/if}
-				<span><span class="k">generated</span> {review.dateLabel}</span>
-				<span><span class="k">duration</span> {review.durationLabel}</span>
+				<span><span class="k">generated</span> <Time ts={review.createdAt} /></span>
+				<span><span class="k">duration</span> {fmtDur(review.durationSecs)}</span>
 				<span><span class="k">lines</span> {review.lines.toLocaleString('en-US')}</span>
 			</div>
 		</div>
@@ -150,7 +151,7 @@
 							{#if t}
 								<div class="triage-info mono">
 									<span class="triage-actor">Triaged by <strong>{t.triagedBy || 'unknown'}</strong></span>
-									<span class="triage-time" title={fmtDate(t.updatedAt || t.createdAt)}>{fmtAgo(t.updatedAt || t.createdAt)}</span>
+									<span class="triage-time"><Time ts={t.updatedAt || t.createdAt} mode="ago" /></span>
 									{#if t.note}
 										<span class="triage-note">“{t.note}”</span>
 									{/if}

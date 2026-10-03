@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { scan } from '$lib/scan.svelte';
+	import { fmtDur, langColor } from '$lib/format';
 	import SeverityPills from '$lib/components/SeverityPills.svelte';
+	import Time from '$lib/components/Time.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -29,7 +31,7 @@
 
 	<div class="head">
 		<div class="head-left">
-			<div class="repo-icon"><span class="lang-dot" style="background:{repo.langColor}"></span></div>
+			<div class="repo-icon"><span class="lang-dot" style="background:{langColor(repo.lang)}"></span></div>
 			<div>
 				<h1 class="display">{repo.id}</h1>
 				<div class="meta mono">
@@ -71,8 +73,8 @@
 			<div class="tile-num display">{repo.counts.low}</div>
 		</div>
 		<div class="card meta-card">
-			<div><div class="ml">Last scan</div><div class="mv mono">{repo.lastRunLabel}</div></div>
-			<div><div class="ml">Duration</div><div class="mv mono">{repo.lastDurationLabel}</div></div>
+			<div><div class="ml">Last scan</div><div class="mv mono">{#if repo.lastRunAt !== null}<Time ts={repo.lastRunAt} mode="ago" />{:else}never{/if}</div></div>
+			<div><div class="ml">Duration</div><div class="mv mono">{repo.lastDurationSecs !== null ? fmtDur(repo.lastDurationSecs) : '—'}</div></div>
 			<div><div class="ml">Lines</div><div class="mv mono">{repo.lines.toLocaleString('en-US')}</div></div>
 			<div><div class="ml">Files</div><div class="mv mono">{repo.filesScanned}</div></div>
 		</div>
@@ -109,7 +111,7 @@
 			</div>
 			{#each repo.reviews as rv (rv.id)}
 				<a class="rrow" href="{base}/repo/{repo.id}/review/{rv.id}">
-					<div class="mono rdate">{rv.dateLabel}</div>
+					<div class="mono rdate"><Time ts={rv.createdAt} /></div>
 					<div class="mono rcommit">{rv.commit}</div>
 					<div class="mono rmodel">{rv.model || '—'}</div>
 					<div class="rtrigger">{rv.trigger}</div>
@@ -122,7 +124,7 @@
 							</span>
 						{/if}
 					</div>
-					<div class="mono rdur">{rv.durationLabel}</div>
+					<div class="mono rdur">{fmtDur(rv.durationSecs)}</div>
 					<div class="rchev" aria-hidden="true">›</div>
 				</a>
 			{/each}

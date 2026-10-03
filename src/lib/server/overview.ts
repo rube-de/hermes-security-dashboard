@@ -2,11 +2,11 @@ import { db } from './db';
 import { listRepoSummaries } from './repos';
 import { getMeta } from './meta';
 import { getTrends } from './trends';
-import { emptyCounts, fmtAgo, fmtDur, fmtUntil } from '$lib/format';
+import { emptyCounts } from '$lib/format';
 import type { Overview, TrendPoint } from '$lib/types';
 
 export function getOverview(now = Date.now()): Overview {
-	const repos = listRepoSummaries(now);
+	const repos = listRepoSummaries();
 	const totals = emptyCounts();
 	let quietedTotal = 0;
 	for (const r of repos) {
@@ -28,12 +28,6 @@ export function getOverview(now = Date.now()): Overview {
 	// Next run is whatever the agent last reported (meta.next_run_at); there is no
 	// fixed cadence to fall back on. Unset → null → "unscheduled".
 	const storedNext = Number(getMeta('next_run_at', '0'));
-	const nextRunAt = storedNext > 0 ? storedNext : null;
-	const nextRunLabel = !nextRunAt
-		? 'unscheduled'
-		: nextRunAt - now < 60_000
-			? 'due now'
-			: `in ${fmtUntil(nextRunAt, now)}`;
 
 	return {
 		totals,
@@ -42,11 +36,9 @@ export function getOverview(now = Date.now()): Overview {
 		clean: repos.length - flagged,
 		reposCount: repos.length,
 		reviewsAllTime,
-		avgScanLabel: avgRow.a ? fmtDur(avgRow.a) : '—',
-		orgLabel: getMeta('org_label', 'Oasis Protocol'),
-		lastRunLabel: lastRow.m ? fmtAgo(lastRow.m, now) : 'never',
-		nextRunAt,
-		nextRunLabel,
+		avgScanSecs: avgRow.a === null ? null : Math.round(avgRow.a),
+		lastRunAt: lastRow.m,
+		nextRunAt: storedNext > 0 ? storedNext : null,
 		trend: getTrends(14, {}, now).map((b) => ({ day: b.day, count: b.newFindings }) satisfies TrendPoint),
 		repos
 	};

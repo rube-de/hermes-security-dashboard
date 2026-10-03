@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { scan } from '$lib/scan.svelte';
-	import { fmtInt, fmtDate, statusColor, SEV_VAR } from '$lib/format';
+	import { fmtDur, fmtInt, fmtStatus, langColor, statusColor, SEV_VAR } from '$lib/format';
 	import SeverityPills from '$lib/components/SeverityPills.svelte';
+	import Time from '$lib/components/Time.svelte';
 	import type { Severity } from '$lib/types';
 	import type { PageData } from './$types';
 
@@ -95,7 +96,8 @@
 			<h1 class="display">Repository Review Status</h1>
 			<p class="lede">
 				Hermes scans <strong>{o.reposCount}</strong>
-				{o.orgLabel} repositories · last run {o.lastRunLabel}
+				{data.orgLabel} repositories · last run
+				{#if o.lastRunAt !== null}<Time ts={o.lastRunAt} mode="ago" />{:else}never{/if}
 			</p>
 		</div>
 	</div>
@@ -153,7 +155,9 @@
 	<div class="run-strip">
 		<div class="card run">
 			<div class="klabel mono">Last run</div>
-			<div class="run-big display">{o.lastRunLabel}</div>
+			<div class="run-big display">
+				{#if o.lastRunAt !== null}<Time ts={o.lastRunAt} mode="ago" />{:else}never{/if}
+			</div>
 			<div class="muted sm">{o.reposCount} repos scanned</div>
 		</div>
 		<div class="card run active" role="status">
@@ -176,8 +180,10 @@
 		</div>
 		<div class="card run">
 			<div class="klabel mono">Next run</div>
-			<div class="run-big display">{o.nextRunLabel}</div>
-			<div class="muted sm">{o.nextRunAt ? fmtDate(o.nextRunAt) : '—'}</div>
+			<div class="run-big display">
+				{#if o.nextRunAt !== null}<Time ts={o.nextRunAt} mode="until" />{:else}unscheduled{/if}
+			</div>
+			<div class="muted sm">{#if o.nextRunAt !== null}<Time ts={o.nextRunAt} />{:else}—{/if}</div>
 		</div>
 	</div>
 
@@ -206,7 +212,7 @@
 		</div>
 		<div class="card stat">
 			<div class="muted">Avg scan duration</div>
-			<div class="stat-num display">{o.avgScanLabel}</div>
+			<div class="stat-num display">{o.avgScanSecs !== null ? fmtDur(o.avgScanSecs) : '—'}</div>
 		</div>
 		<div class="card stat">
 			<div class="muted">Reviews all-time</div>
@@ -277,19 +283,21 @@
 			{#each filtered as r (r.id)}
 				<a class="trow" href="{base}/repo/{r.id}">
 					<div class="cell-repo">
-						<span class="lang-dot" style="background:{r.langColor}"></span>
+						<span class="lang-dot" style="background:{langColor(r.lang)}"></span>
 						<div class="repo-text">
 							<div class="repo-id mono">{r.id}</div>
 							<div class="repo-desc">{r.description}</div>
 						</div>
 					</div>
 					<div class="cell-status" style="color:{statusColor(r.counts)}">
-						<span class="sdot" style="background:{statusColor(r.counts)}"></span>{r.statusLabel}
+						<span class="sdot" style="background:{statusColor(r.counts)}"></span>{fmtStatus(r.counts)}
 					</div>
 					<div class="cell-find">
 						<SeverityPills counts={r.counts} cleanLabel="✓ all clear" />
 					</div>
-					<div class="cell-scan mono">{r.lastRunLabel}</div>
+					<div class="cell-scan mono">
+						{#if r.lastRunAt !== null}<Time ts={r.lastRunAt} mode="ago" />{:else}never{/if}
+					</div>
 					<div class="cell-chev" aria-hidden="true">›</div>
 				</a>
 			{/each}

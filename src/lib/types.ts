@@ -62,10 +62,9 @@ export interface ReviewSummary {
 	model: string;
 	prevCommit: string | null;
 	trigger: string;
+	/** Epoch-ms. */
 	createdAt: number;
-	dateLabel: string;
-	agoLabel: string;
-	durationLabel: string;
+	/** Scan duration in seconds. */
 	durationSecs: number;
 	counts: SeverityCounts;
 	clean: boolean;
@@ -98,7 +97,6 @@ export interface RepoSummary {
 	path: string;
 	branch: string;
 	lines: number;
-	langColor: string;
 	/** Status counts: the union of findings across all scans of the current commit,
 	 *  excluding findings quieted by triage (false-positive / accepted-risk). */
 	counts: SeverityCounts;
@@ -106,12 +104,12 @@ export interface RepoSummary {
 	 *  is `counts.total + quietedCount`. */
 	quietedCount: number;
 	status: 'flagged' | 'clean';
-	statusLabel: string;
 	clean: boolean;
-	glyph: string;
 	scanning: boolean;
-	lastRunLabel: string;
-	lastDurationLabel: string;
+	/** Epoch-ms of the current commit's latest scan, or null if never scanned. */
+	lastRunAt: number | null;
+	/** Duration in seconds of that scan, or null if never scanned. */
+	lastDurationSecs: number | null;
 	filesScanned: number;
 	/** The repo's current commit (most recently introduced), or null if never scanned. */
 	headCommit: string | null;
@@ -151,12 +149,12 @@ export interface Overview {
 	clean: number;
 	reposCount: number;
 	reviewsAllTime: number;
-	avgScanLabel: string;
-	orgLabel: string;
-	lastRunLabel: string;
+	/** Mean scan duration across all reviews in whole seconds, or null if there are none. */
+	avgScanSecs: number | null;
+	/** Epoch-ms of the most recent review of any repo, or null if there are none. */
+	lastRunAt: number | null;
 	/** Agent-reported next planned run (epoch-ms), or null if unscheduled. */
 	nextRunAt: number | null;
-	nextRunLabel: string;
 	trend: TrendPoint[];
 	repos: RepoSummary[];
 }

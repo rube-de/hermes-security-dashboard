@@ -28,7 +28,7 @@ describe('insertReview lifecycle', () => {
 		expect(duplicate).toBe(false);
 		expect(id).toBeDefined();
 
-		const detail = getReviewDetail(id, t0);
+		const detail = getReviewDetail(id);
 		expect(detail).not.toBeNull();
 		expect(detail?.diff.newCount).toBe(2);
 		expect(detail?.diff.resolvedCount).toBe(0);
@@ -95,7 +95,7 @@ describe('insertReview lifecycle', () => {
 		});
 		expect(res2.duplicate).toBe(false);
 
-		const detail2 = getReviewDetail(res2.id, t1);
+		const detail2 = getReviewDetail(res2.id);
 		// In a re-scan of the same commit, resolved is not computed (prevCommit is null)
 		expect(detail2?.prevCommit).toBeNull();
 		expect(detail2?.diff.resolvedCount).toBe(0);
@@ -162,7 +162,7 @@ describe('insertReview lifecycle', () => {
 			findings: [{ severity: 'low', file: 'src/keep.ts', title: 'Bug 2' }]
 		});
 
-		const d2 = getReviewDetail(id2, t1);
+		const d2 = getReviewDetail(id2);
 		expect(d2?.prevCommit).toBe('c001');
 		expect(d2?.diff.newCount).toBe(0);
 		expect(d2?.diff.resolvedCount).toBe(1);
@@ -192,7 +192,7 @@ describe('insertReview lifecycle', () => {
 			findings: [{ severity: 'high', file: 'src/regress.ts', title: 'Old Bug' }]
 		});
 
-		const d3 = getReviewDetail(id3, t2);
+		const d3 = getReviewDetail(id3);
 		expect(d3?.prevCommit).toBe('c002');
 		// Because Old Bug was seen in c001, it is NOT considered new in the repo
 		expect(d3?.diff.newCount).toBe(0);

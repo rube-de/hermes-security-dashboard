@@ -106,38 +106,89 @@ export function statusColor(counts: SeverityCounts): string {
 	return 'var(--low)';
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-/** "2h 14m ago" style relative label from a timestamp. */
-export function fmtAgo(ts: number, now: number = Date.now()): string {
-	const mins = Math.max(0, Math.round((now - ts) / 60000));
-	if (mins < 1) return 'just now';
-	if (mins < 60) return `${mins}m ago`;
-	const hrs = mins / 60;
-	if (hrs < 24) {
-		const h = Math.floor(hrs);
-		const m = Math.round(mins - h * 60);
-		return m > 0 ? `${h}h ${m}m ago` : `${h}h ago`;
-	}
-	return `${Math.round(hrs / 24)}d ago`;
+/** Repo status text: "Clean", or the open-issue count ("1 issue", "3 issues"). */
+export function fmtStatus(counts: SeverityCounts): string {
+	if (counts.total === 0) return 'Clean';
+	return `${counts.total} issue${counts.total > 1 ? 's' : ''}`;
 }
 
-/** "in 3h 46m" style countdown to a future timestamp. */
-export function fmtUntil(ts: number, now: number = Date.now()): string {
-	const mins = Math.max(0, Math.round((ts - now) / 60000));
-	if (mins < 1) return 'due now';
+/* ------------------------------------------------------------------ */
+/* time                                                                */
+/* ------------------------------------------------------------------ */
+// The API returns raw epoch-ms timestamps and second counts; these helpers turn them
+// into display text on the client. Absolute times format in an explicit IANA `timeZone`
+// or, when it is omitted, the runtime's own zone (the browser's, client-side). Relative
+// times take `now` from the shared ticking clock ($lib/clock.svelte).
+
+/** Compact span for a non-negative whole-minute count: "14m", "2h 14m", "3h", "2d". */
+function fmtSpan(mins: number): string {
 	if (mins < 60) return `${mins}m`;
-	const h = Math.floor(mins / 60);
-	const m = mins % 60;
-	return m > 0 ? `${h}h ${m}m` : `${h}h`;
+	if (mins < 24 * 60) {
+		const h = Math.floor(mins / 60);
+		const m = mins % 60;
+		return m > 0 ? `${h}h ${m}m` : `${h}h`;
+	}
+	return `${Math.round(mins / (24 * 60))}d`;
 }
 
-/** "Jun 16 · 09:46" style absolute label. */
-export function fmtDate(ts: number): string {
-	const d = new Date(ts);
-	const hh = String(d.getHours()).padStart(2, '0');
-	const mm = String(d.getMinutes()).padStart(2, '0');
-	return `${MONTHS[d.getMonth()]} ${d.getDate()} · ${hh}:${mm}`;
+/** "2h 14m ago" for a past timestamp; "just now" under a minute (or if `ts` is ahead of `now`). */
+export function fmtAgo(ts: number, now: number): string {
+	const mins = Math.round((now - ts) / 60_000);
+	return mins < 1 ? 'just now' : `${fmtSpan(mins)} ago`;
+}
+
+/** "in 3h 46m" for a future timestamp; "due now" under a minute away or once it has passed. */
+export function fmtUntil(ts: number, now: number): string {
+	const mins = Math.round((ts - now) / 60_000);
+	return mins < 1 ? 'due now' : `in ${fmtSpan(mins)}`;
+}
+
+const SHORT_DATE: Intl.DateTimeFormatOptions = {
+	month: 'short',
+	day: 'numeric',
+	hour: '2-digit',
+	minute: '2-digit',
+	hourCycle: 'h23'
+};
+const FULL_DATE: Intl.DateTimeFormatOptions = {
+	...SHORT_DATE,
+	weekday: 'short',
+	year: 'numeric',
+	second: '2-digit',
+	timeZoneName: 'short'
+};
+
+// Building an Intl.DateTimeFormat costs far more than using one: keep one per (style, zone).
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
+/** Date parts of `ts` in `timeZone`. Text is assembled from parts rather than `format()`
+ *  so separators can't differ between ICU builds: SSR (Node) and hydration (browser)
+ *  must produce identical strings for the same zone. */
+function dateParts(ts: number, style: 'short' | 'full', timeZone?: string) {
+	const key = `${style}|${timeZone ?? ''}`;
+	let f = formatters.get(key);
+	if (!f) {
+		f = new Intl.DateTimeFormat('en-US', {
+			...(style === 'short' ? SHORT_DATE : FULL_DATE),
+			timeZone
+		});
+		formatters.set(key, f);
+	}
+	const parts: Partial<Record<Intl.DateTimeFormatPartTypes, string>> = {};
+	for (const { type, value } of f.formatToParts(ts)) parts[type] = value;
+	return parts;
+}
+
+/** "Jun 16 · 09:46" in `timeZone` (default: the runtime's local zone). */
+export function fmtDate(ts: number, timeZone?: string): string {
+	const p = dateParts(ts, 'short', timeZone);
+	return `${p.month} ${p.day} · ${p.hour}:${p.minute}`;
+}
+
+/** "Tue, Jun 16, 2026, 09:46:12 GMT+2": full date, time and zone name, for `title` tooltips. */
+export function fmtDateFull(ts: number, timeZone?: string): string {
+	const p = dateParts(ts, 'full', timeZone);
+	return `${p.weekday}, ${p.month} ${p.day}, ${p.year}, ${p.hour}:${p.minute}:${p.second} ${p.timeZoneName}`;
 }
 
 /** "3m 51s" style duration from seconds. */

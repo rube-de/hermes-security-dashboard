@@ -164,6 +164,12 @@ UI pages read directly from the database via server `load`. The active-run
 banner polls `GET /api/scan`, which returns the live scan state along with
 `dataVersion`. The client polls using a backoff-aware timer chain, pauses when
 hidden, and triggers `invalidateAll()` whenever `dataVersion` advances.
+
+Times are formatted in the browser: absolute times in its local time zone (hover
+one for the full date and zone name), relative ones ("2h 14m ago", "in 3h") on a
+shared 30-second clock, so they stay current without a reload. Server-rendered
+HTML shows UTC times until the page hydrates.
+
 ## Agent API
 
 A machine-readable **OpenAPI 3.1** spec lives at
@@ -175,10 +181,14 @@ and renders browsable docs:
 - **`/api/openapi.json`** — the spec as JSON, for codegen/tooling.
 
 (Under a sub-path deploy each sits beneath the base path, e.g. `/security/docs`.)
-The tables below mirror the spec; the route handlers remain the source of truth.
+The tables below mirror the spec, and a contract test checks the read responses
+against it.
 
 Base path `/api`. Reads are open; **writes** honour `HERMES_API_TOKEN` if set
-(`Authorization: Bearer <token>`), otherwise are unauthenticated.
+(`Authorization: Bearer <token>`), otherwise are unauthenticated. Read responses
+carry raw values, not display strings: timestamps are epoch-ms (`createdAt`,
+`lastRunAt`, `nextRunAt`) and durations are seconds (`durationSecs`,
+`lastDurationSecs`, `avgScanSecs`); formatting is up to the client.
 
 The producer is the Hermes agent itself: it runs the security review on a
 schedule (a cron-style task configured agent-side) and POSTs each result to the

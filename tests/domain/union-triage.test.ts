@@ -37,7 +37,7 @@ describe('commit union + triage quieting', () => {
 			]
 		});
 
-		const repo = getRepoDetail(repoId, t0 + 2000);
+		const repo = getRepoDetail(repoId);
 		expect(repo).not.toBeNull();
 		// Reentrancy should be upgraded to 'crit'
 		expect(repo?.counts.crit).toBe(1);
@@ -117,7 +117,7 @@ describe('commit union + triage quieting', () => {
 			findings: []
 		});
 
-		const detail = getReviewDetail(r2, 2000);
+		const detail = getReviewDetail(r2);
 		// Because Reentrancy was quieted, it must NOT appear as a resolved fix
 		expect(detail?.resolved).toHaveLength(0);
 	});

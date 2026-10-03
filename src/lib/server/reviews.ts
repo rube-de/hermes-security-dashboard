@@ -3,7 +3,7 @@ import { type ReviewRow, type FindingRow } from './rows';
 import { countsForReview } from './commits';
 import { triageMapForRepo } from './triage';
 import { fingerprint } from './fingerprint';
-import { fmtAgo, fmtDate, fmtDur, SEVERITIES, countSeverities, quiets } from '$lib/format';
+import { SEVERITIES, countSeverities, quiets } from '$lib/format';
 import type { Finding, ResolvedFinding, ReviewDetail, ReviewSummary, SeverityCounts } from '$lib/types';
 
 // SQL severity ordering, derived from SEVERITIES so it can't drift from SEV_RANK.
@@ -20,7 +20,7 @@ export function findReviewByHash(repoId: string, hash: string): string | null {
 	return row?.id ?? null;
 }
 
-export function reviewSummary(rv: ReviewRow, now: number, precomputedCounts?: SeverityCounts): ReviewSummary {
+export function reviewSummary(rv: ReviewRow, precomputedCounts?: SeverityCounts): ReviewSummary {
 	const counts = precomputedCounts ?? countsForReview(rv.id);
 	return {
 		id: rv.id,
@@ -30,9 +30,6 @@ export function reviewSummary(rv: ReviewRow, now: number, precomputedCounts?: Se
 		prevCommit: rv.prev_commit,
 		trigger: rv.trigger,
 		createdAt: rv.created_at,
-		dateLabel: fmtDate(rv.created_at),
-		agoLabel: fmtAgo(rv.created_at, now),
-		durationLabel: fmtDur(rv.duration_secs),
 		durationSecs: rv.duration_secs,
 		counts,
 		clean: counts.total === 0,
@@ -57,7 +54,7 @@ export interface ListReviewsOpts {
  * severity counts plus new/resolved deltas, so a consumer can build any trend
  * or analytics view it likes.
  */
-export function listReviews(opts: ListReviewsOpts = {}, now = Date.now()): ReviewSummary[] {
+export function listReviews(opts: ListReviewsOpts = {}): ReviewSummary[] {
 	const where: string[] = [];
 	const params: (string | number)[] = [];
 	if (opts.repoId) {
@@ -77,10 +74,10 @@ export function listReviews(opts: ListReviewsOpts = {}, now = Date.now()): Revie
 		`SELECT * FROM reviews ${where.length ? 'WHERE ' + where.join(' AND ') : ''}` +
 		' ORDER BY created_at DESC LIMIT ?';
 	const rows = db.prepare(sql).all(...params, limit) as unknown as ReviewRow[];
-	return rows.map((rv) => reviewSummary(rv, now));
+	return rows.map((rv) => reviewSummary(rv));
 }
 
-export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetail | null {
+export function getReviewDetail(reviewId: string): ReviewDetail | null {
 	const rv = db.prepare('SELECT * FROM reviews WHERE id = ?').get(reviewId) as ReviewRow | undefined;
 	if (!rv) return null;
 	const rows = db
@@ -137,7 +134,7 @@ export function getReviewDetail(reviewId: string, now = Date.now()): ReviewDetai
 	// A dismissed finding the agent later stops reporting must not read as a "fix".
 	resolved = resolved.filter((rf) => !quiets(triage.get(fingerprint(rf.file, rf.title))));
 
-	const summary = reviewSummary(rv, now, counts);
+	const summary = reviewSummary(rv, counts);
 	return {
 		...summary,
 		quietedCount,

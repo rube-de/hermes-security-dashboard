@@ -17,8 +17,13 @@ info:
     every path below — UI *and* `/api/*` — is served only under that prefix, and
     the root 404s. Pick the matching `servers` entry.
 
-    This document is hand-maintained from the route handlers; it is not generated,
-    so treat the code as the source of truth if they ever diverge.
+    **Raw values.** Read responses carry data, not display text: timestamps are
+    epoch-ms (UTC) and durations are whole seconds. Formatting is the client's job
+    (the dashboard renders them in the browser's local time zone).
+
+    This document is hand-maintained from the route handlers; it is not generated.
+    The test suite checks the read endpoints' responses against these schemas, so
+    the two cannot drift apart unnoticed.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -548,9 +553,8 @@ components:
         Repository with status derived from its current commit (the most recently
         introduced one), unioned across all of that commit's scans.
       required:
-        [id, lang, description, path, branch, lines, langColor, counts, quietedCount, status,
-         statusLabel, clean, glyph, scanning, lastRunLabel, lastDurationLabel, filesScanned,
-         headCommit, headScanCount]
+        [id, lang, description, path, branch, lines, counts, quietedCount, status, clean,
+         scanning, lastRunAt, lastDurationSecs, filesScanned, headCommit, headScanCount]
       properties:
         id: { type: string }
         lang: { type: string }
@@ -558,7 +562,6 @@ components:
         path: { type: string }
         branch: { type: string }
         lines: { type: integer }
-        langColor: { type: string, description: Hex colour for the language }
         counts:
           allOf:
             - $ref: '#/components/schemas/SeverityCounts'
@@ -569,12 +572,14 @@ components:
           type: integer
           description: Head-commit findings hidden from `counts` by triage.
         status: { type: string, enum: [flagged, clean] }
-        statusLabel: { type: string }
         clean: { type: boolean }
-        glyph: { type: string, description: '`[ok]` or `[!!]`' }
         scanning: { type: boolean }
-        lastRunLabel: { type: string }
-        lastDurationLabel: { type: string }
+        lastRunAt:
+          type: [integer, 'null']
+          description: Epoch-ms of the current commit's latest scan, or null if never scanned.
+        lastDurationSecs:
+          type: [integer, 'null']
+          description: Duration in seconds of that scan, or null if never scanned.
         filesScanned: { type: integer }
         headCommit:
           type: [string, 'null']
@@ -598,8 +603,8 @@ components:
       type: object
       description: Lightweight review row (no findings).
       required:
-        [id, repoId, commit, model, trigger, createdAt, dateLabel, agoLabel, durationLabel,
-         durationSecs, counts, clean, newCount, resolvedCount, hasDelta]
+        [id, repoId, commit, model, trigger, createdAt, durationSecs, counts, clean, newCount,
+         resolvedCount, hasDelta]
       properties:
         id: { type: string, description: Review UUID }
         repoId: { type: string }
@@ -610,10 +615,7 @@ components:
           description: Previous commit used for the diff, or null
         trigger: { type: string, description: 'e.g. Scheduled, Push to main' }
         createdAt: { type: integer, description: Epoch-ms }
-        dateLabel: { type: string }
-        agoLabel: { type: string }
-        durationLabel: { type: string }
-        durationSecs: { type: integer }
+        durationSecs: { type: integer, description: Scan duration in seconds }
         counts: { $ref: '#/components/schemas/SeverityCounts' }
         clean: { type: boolean }
         newCount: { type: integer }
@@ -833,8 +835,8 @@ components:
     Overview:
       type: object
       required:
-        [totals, quietedTotal, flagged, clean, reposCount, reviewsAllTime, avgScanLabel,
-         orgLabel, lastRunLabel, nextRunAt, nextRunLabel, trend, repos]
+        [totals, quietedTotal, flagged, clean, reposCount, reviewsAllTime, avgScanSecs,
+         lastRunAt, nextRunAt, trend, repos]
       properties:
         totals: { $ref: '#/components/schemas/SeverityCounts' }
         quietedTotal:
@@ -844,13 +846,15 @@ components:
         clean: { type: integer, description: Repos without findings }
         reposCount: { type: integer }
         reviewsAllTime: { type: integer }
-        avgScanLabel: { type: string }
-        orgLabel: { type: string }
-        lastRunLabel: { type: string }
+        avgScanSecs:
+          type: [integer, 'null']
+          description: Mean scan duration across all reviews in whole seconds, or null if there are none.
+        lastRunAt:
+          type: [integer, 'null']
+          description: Epoch-ms of the most recent review of any repo, or null if there are none.
         nextRunAt:
           type: [integer, 'null']
-          description: Epoch-ms of the agent's next planned run, or null if unscheduled
-        nextRunLabel: { type: string, description: 'e.g. "in 3h 46m", "due now", "unscheduled"' }
+          description: Epoch-ms of the agent's next planned run, or null if unscheduled.
         trend:
           type: array
           items: { $ref: '#/components/schemas/TrendPoint' }

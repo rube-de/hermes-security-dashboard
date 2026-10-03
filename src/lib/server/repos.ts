@@ -4,7 +4,7 @@ import { repoHead, latestReviewRowForCommit, unionFindingsForCommit } from './co
 import { reviewSummary } from './reviews';
 import { triageMapForRepo } from './triage';
 import { getScan } from './scan';
-import { langColor, countSeverities, fmtAgo, fmtDur, quiets } from '$lib/format';
+import { countSeverities, quiets } from '$lib/format';
 import type { RepoDetail, RepoSummary } from '$lib/types';
 
 export interface RepoInput {
@@ -51,9 +51,9 @@ export function repoExists(id: string): boolean {
 	return !!db.prepare('SELECT 1 FROM repos WHERE id = ? LIMIT 1').get(id);
 }
 
-export function buildRepoSummary(repo: RepoRow, scanRepoId: string | null, now: number): RepoSummary {
+export function buildRepoSummary(repo: RepoRow, scanRepoId: string | null): RepoSummary {
 	// The card describes the *current code state* = the head commit (the most
-	// recently introduced one). Status counts AND the "last scan" labels both come
+	// recently introduced one). Status counts AND the "last scan" fields both come
 	// from that commit, so re-scanning an older commit — newer activity, but stale
 	// code — changes neither. `head.scan` is the head commit's most recent scan.
 	const head = repoHead(repo.id);
@@ -74,36 +74,32 @@ export function buildRepoSummary(repo: RepoRow, scanRepoId: string | null, now: 
 		path: repo.path,
 		branch: repo.branch,
 		lines: repo.lines,
-		langColor: langColor(repo.lang),
 		counts,
 		quietedCount,
 		status,
-		statusLabel:
-			status === 'clean' ? 'Clean' : `${counts.total} issue${counts.total > 1 ? 's' : ''}`,
 		clean: status === 'clean',
-		glyph: status === 'clean' ? '[ok]' : '[!!]',
 		scanning: scanRepoId === repo.id,
-		lastRunLabel: headScan ? fmtAgo(headScan.created_at, now) : 'never',
-		lastDurationLabel: headScan ? fmtDur(headScan.duration_secs) : '—',
+		lastRunAt: headScan?.created_at ?? null,
+		lastDurationSecs: headScan?.duration_secs ?? null,
 		filesScanned: headScan?.files_scanned ?? 0,
 		headCommit: head?.commit ?? null,
 		headScanCount: head?.scans ?? 0
 	};
 }
 
-export function listRepoSummaries(now = Date.now()): RepoSummary[] {
+export function listRepoSummaries(): RepoSummary[] {
 	const scan = getScan();
 	const scanRepoId = scan.active ? scan.repoId : null;
-	return allRepoRows().map((r) => buildRepoSummary(r, scanRepoId, now));
+	return allRepoRows().map((r) => buildRepoSummary(r, scanRepoId));
 }
 
-export function getRepoDetail(id: string, now = Date.now()): RepoDetail | null {
+export function getRepoDetail(id: string): RepoDetail | null {
 	const repo = getRepoRow(id);
 	if (!repo) return null;
 	const scan = getScan();
-	const summary = buildRepoSummary(repo, scan.active ? scan.repoId : null, now);
+	const summary = buildRepoSummary(repo, scan.active ? scan.repoId : null);
 	const reviewRows = db
 		.prepare('SELECT * FROM reviews WHERE repo_id = ? ORDER BY created_at DESC')
 		.all(id) as unknown as ReviewRow[];
-	return { ...summary, reviews: reviewRows.map((rv) => reviewSummary(rv, now)) };
+	return { ...summary, reviews: reviewRows.map((rv) => reviewSummary(rv)) };
 }
