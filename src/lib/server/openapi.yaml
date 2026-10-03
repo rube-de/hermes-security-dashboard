@@ -116,7 +116,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RepoDetail' }
         '400':
-          description: Invalid JSON body, or missing `id`/`lang`
+          description: >-
+            Invalid JSON body (or not an object), missing `id`/`lang`, a new `id` that
+            doesn't match `^[A-Za-z0-9._-]{1,100}$`, or a `lines` that isn't a
+            non-negative integer
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -288,15 +291,22 @@ paths:
       operationId: submitReview
       summary: Submit a security review report
       description: |
+        Every finding is stored; only exact duplicates (same issue identity at the
+        same line + `locationKey`) collapse, to the most severe. Findings sharing an
+        identity are one issue with several locations. Identity is `ruleId` + `file`
+        + `locationKey` when the finding carries a `ruleId` (the title is ignored, so
+        rephrasing keeps it), else the legacy `file` + `title` key; see the
+        `fingerprint` field of Finding.
+
         A commit can be scanned more than once (non-deterministic LLM re-runs,
         different models), so submits are idempotent on scan **content**, not on
-        `(repo, commit)`. The content key is commit + model + engine + the finding
-        set, where each finding contributes only its severity + file + title (a
+        `(repo, commit)`. The content key is commit + model + engine + the issue set,
+        where each issue contributes only its identity + most severe rating (a
         finding's line/description/recommendation/code are not part of the key). A
         resubmit with the same key returns the existing review with `duplicate: true`
-        and HTTP 200; a different finding set, severity, or model creates a new
+        and HTTP 200; a different issue set, severity, or model creates a new
         review. The new/carried/resolved diff is a property of the *commit*: only a
-        commit's first scan carries a delta (computed against the union of findings on
+        commit's first scan carries a delta (computed against the union of issues on
         the previous commit), and re-scans of the same commit report a zero delta so a
         re-run can't fabricate churn. The repository must be registered first.
       security:
@@ -322,7 +332,10 @@ paths:
               schema: { $ref: '#/components/schemas/ReviewSubmitResponse' }
               example: { ok: true, reviewId: 8f3c…, repoId: sapphire-paratime, duplicate: true }
         '400':
-          description: Invalid JSON, missing `commit`, or an invalid finding
+          description: >-
+            Invalid JSON (or not an object), missing `commit`, an invalid finding, a
+            numeric field that isn't a non-negative integer, `findings` that isn't an
+            array, or a malformed `nextRunAt` (including 10-digit epoch seconds)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -349,12 +362,15 @@ paths:
           in: query
           required: false
           schema: { type: string }
-          description: Inclusive lower bound on creation time — epoch-ms or ISO-8601
+          description: Inclusive lower bound on creation time; see the `until` parameter for accepted formats
         - name: until
           in: query
           required: false
           schema: { type: string }
-          description: Inclusive upper bound on creation time — epoch-ms or ISO-8601
+          description: >-
+            Inclusive upper bound on creation time: epoch-ms (12+ digits), a 4-digit
+            year (Jan 1 of that year, UTC, e.g. `2024`), or ISO-8601. A 10-digit value
+            is epoch seconds and is rejected with 400.
         - name: limit
           in: query
           required: false
@@ -366,7 +382,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ReviewsResponse' }
         '400':
-          description: Malformed time, or out-of-bounds/non-integer limit
+          description: Malformed time (including 10-digit epoch seconds), or out-of-bounds/non-integer limit
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -423,7 +439,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ScanState' }
         '400':
-          description: Invalid JSON, or `active` missing/not a boolean
+          description: >-
+            Invalid JSON (or not an object), `active` missing/not a boolean, a field of
+            the wrong type, or an active scan naming an unregistered `repoId`
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -447,7 +465,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ScanState' }
         '400':
-          description: Invalid JSON, or `active` missing/not a boolean
+          description: >-
+            Invalid JSON (or not an object), `active` missing/not a boolean, a field of
+            the wrong type, or an active scan naming an unregistered `repoId`
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -502,7 +522,8 @@ components:
       in: path
       required: true
       schema: { type: string }
-      description: Stable finding identity — the `fingerprint` field of a Finding
+      description: >-
+        Stable issue identity — the `fingerprint` field of a Finding (16 hex chars)
 
   responses:
     Unauthorized:
@@ -538,14 +559,19 @@ components:
       type: object
       required: [id, lang]
       properties:
-        id: { type: string, description: Unique repository identifier }
+        id:
+          type: string
+          pattern: '^[A-Za-z0-9._-]{1,100}$'
+          description: >-
+            Unique repository identifier, one URL path segment (not `.` or `..`).
+            Repos registered before this rule can still be updated under their old id.
         lang: { type: string, description: 'Primary language (e.g. Solidity, Rust)' }
         description: { type: string, default: '' }
         path:
           type: string
           description: GitHub path; defaults to `oasisprotocol/{id}`
         branch: { type: string, default: main }
-        lines: { type: integer, default: 0 }
+        lines: { type: integer, minimum: 0, default: 0 }
 
     RepoSummary:
       type: object
@@ -613,7 +639,7 @@ components:
         prevCommit:
           type: [string, 'null']
           description: Previous commit used for the diff, or null
-        trigger: { type: string, description: 'e.g. Scheduled, Push to main' }
+        trigger: { type: string, description: "e.g. Scheduled, Push to main; '' when unreported" }
         createdAt: { type: integer, description: Epoch-ms }
         durationSecs: { type: integer, description: Scan duration in seconds }
         counts: { $ref: '#/components/schemas/SeverityCounts' }
@@ -626,9 +652,14 @@ components:
       allOf:
         - $ref: '#/components/schemas/ReviewSummary'
         - type: object
-          required: [engine, summary, lines, filesScanned, findings, quietedCount, resolved, diff, hasPrev]
+          required:
+            [engine, agentVersion, summary, lines, filesScanned, findings, quietedCount, resolved,
+             diff, hasPrev]
           properties:
-            engine: { type: string, description: e.g. slither+semgrep+llm }
+            engine: { type: string, description: "e.g. slither+semgrep+llm; '' when unreported" }
+            agentVersion:
+              type: string
+              description: Version of the agent that produced the review; '' when unreported.
             summary: { type: string }
             lines: { type: integer }
             filesScanned: { type: integer }
@@ -662,18 +693,45 @@ components:
         severity: { $ref: '#/components/schemas/Severity' }
         title: { type: string }
         file: { type: string }
-        line: { type: integer }
+        line: { type: integer, minimum: 0 }
         cwe: { type: string, description: e.g. CWE-841 }
         description: { type: string }
         code: { type: string, description: Offending snippet }
         recommendation: { type: string }
+        ruleId:
+          type: string
+          maxLength: 200
+          description: >-
+            Id of the tool rule or detector that raised the finding (e.g. slither
+            `reentrancy-eth`, a semgrep rule id). When present, the finding's identity
+            is `ruleId` + `file` + `locationKey` instead of `file` + `title`. Trimmed;
+            null or omitted = not sent.
+        locationKey:
+          type: string
+          maxLength: 200
+          description: >-
+            Enclosing function or symbol of the finding (e.g. `Vault.withdraw`). Part of
+            the identity when a `ruleId` is sent; display-only otherwise. Trimmed; null
+            or omitted = not sent.
+
+    FindingLocation:
+      type: object
+      description: One place an issue was reported in a review.
+      required: [file, line, locationKey]
+      properties:
+        file: { type: string }
+        line: { type: integer }
+        locationKey: { type: string, description: "Enclosing symbol; '' when not sent" }
 
     Finding:
       type: object
-      description: A finding as returned in a review report.
+      description: >-
+        An issue in a review report: every finding of the review that shares an
+        identity (`fingerprint`), with the top-level fields taken from its most severe
+        (then earliest-reported) location.
       required:
-        [severity, title, file, line, cwe, description, code, recommendation,
-         isNew, openRuns, ageHours, fingerprint, triage]
+        [severity, title, file, line, cwe, description, code, recommendation, ruleId,
+         locationKey, locations, isNew, openRuns, ageHours, fingerprint, triage]
       properties:
         severity: { $ref: '#/components/schemas/Severity' }
         title: { type: string }
@@ -683,14 +741,25 @@ components:
         description: { type: string }
         code: { type: string }
         recommendation: { type: string }
+        ruleId: { type: string, description: "Agent-reported rule id; '' when not sent" }
+        locationKey: { type: string, description: "Agent-reported enclosing symbol; '' when not sent" }
+        locations:
+          type: array
+          minItems: 1
+          description: >-
+            Every location of this issue in the review, ordered by file then line. More
+            than one when the same issue was reported at several places.
+          items: { $ref: '#/components/schemas/FindingLocation' }
         isNew: { type: boolean }
         openRuns: { type: integer, description: Consecutive scan cycles open }
         ageHours: { type: integer }
         fingerprint:
           type: string
           description: >-
-            Stable per-repo finding identity (sha1 of file+title). The key a triage
-            verdict is attached to and addressed by.
+            Stable per-repo issue identity: a hash of `ruleId` + `file` + `locationKey`
+            when the agent sent a `ruleId`, else of `file` + `title` (the key every
+            finding had before `ruleId` existed). The key of the new/carried/resolved
+            diff, the counts, and triage: a verdict is attached to and addressed by it.
         triage:
           oneOf:
             - $ref: '#/components/schemas/Triage'
@@ -715,11 +784,12 @@ components:
         updatedAt: { type: integer, description: Last changed (epoch-ms) }
     ResolvedFinding:
       type: object
-      required: [severity, title, file]
+      required: [severity, title, file, fingerprint]
       properties:
         severity: { $ref: '#/components/schemas/Severity' }
         title: { type: string }
         file: { type: string }
+        fingerprint: { type: string, description: Issue identity (see Finding) }
 
     ReviewInput:
       type: object
@@ -734,25 +804,48 @@ components:
             Distinct from `engine` (the static-analysis tool stack). Part of the
             dedup identity, so two models scanning the same commit are kept as
             separate reviews. Shown per row on the repo's review history.
-        trigger: { type: string, default: Scheduled }
-        engine: { type: string, default: slither+semgrep+llm }
-        summary: { type: string, default: '' }
-        durationSecs: { type: integer, default: 0 }
+        trigger:
+          type: string
+          default: ''
+          description: What started the run, e.g. Scheduled. Stored as sent; omitted = '' (shown as —).
+        engine:
+          type: string
+          default: ''
+          description: >-
+            Static-analysis tool stack, e.g. slither+semgrep+llm. Part of the dedup
+            identity. Stored as sent (trimmed); omitted = '' (shown as —).
+        summary:
+          type: string
+          default: ''
+          description: >-
+            Executive summary. When empty, the report shows a line built from the
+            review's own data (issue counts, files, engine, model).
+        durationSecs: { type: integer, minimum: 0, default: 0 }
         lines:
           type: integer
+          minimum: 0
           description: Defaults to the repo's registered line count if omitted
-        filesScanned: { type: integer, default: 0 }
+        filesScanned: { type: integer, minimum: 0, default: 0 }
+        agentVersion:
+          type: string
+          maxLength: 200
+          description: >-
+            Version of the agent that produced the review (e.g. `hermes-agent 1.4.2`).
+            Returned on the review detail and shown on the report only when sent. Not
+            part of the dedup identity.
+            Trimmed; null or omitted = not sent.
         html:
           type: string
           description: Optional pre-rendered report body; sanitized server-side
         nextRunAt:
           type: [integer, string]
           description: >-
-            When the agent plans its next review run — epoch-ms or ISO-8601. Shown
-            as the dashboard "Next run". The schedule is agent-driven/flexible; there
-            is no fixed cadence. Persists until the agent reports a new value:
-            omitting it keeps the last reported next run; send 0 to clear it back to
-            "unscheduled".
+            When the agent plans its next review run — epoch-ms (an integer, or a
+            digits-only string of 12+ digits) or ISO-8601. 10-digit epoch seconds are
+            rejected with 400. Shown as the dashboard "Next run". The schedule is
+            agent-driven/flexible; there is no fixed cadence. Persists until the agent
+            reports a new value: omitting it keeps the last reported next run; send 0
+            to clear it back to "unscheduled".
         findings:
           type: array
           items: { $ref: '#/components/schemas/FindingInput' }
@@ -798,12 +891,16 @@ components:
       required: [active]
       properties:
         active: { type: boolean, description: 'true during a scan, false when complete' }
-        repoId: { type: string }
-        commit: { type: string }
-        currentFile: { type: string }
-        progress: { type: number, description: 0–100; defaults to 0 }
-        engine: { type: string }
-        startedAt: { type: integer, description: Epoch-ms }
+        repoId:
+          type: [string, 'null']
+          description: Must be a registered repository while `active` is true (else 400)
+        commit: { type: [string, 'null'] }
+        currentFile: { type: [string, 'null'] }
+        progress:
+          type: integer
+          description: 0–100; out-of-range integers are clamped, non-integers are a 400. Defaults to 0.
+        engine: { type: [string, 'null'] }
+        startedAt: { type: integer, minimum: 0, description: Epoch-ms; defaults to now }
 
     TrendBucket:
       type: object

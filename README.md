@@ -237,6 +237,11 @@ curl -X POST localhost:3000/api/repos -H 'content-type: application/json' -d '{
 }'
 ```
 
+A new `id` must be a single URL path segment matching `^[A-Za-z0-9._-]{1,100}$`
+(and not `.` or `..`); anything else is a 400. Repos registered before this rule
+keep working and can still be updated under their old id. `lines` must be a
+non-negative integer.
+
 ### Submit a review report
 
 `findings` is the structured form the dashboard renders into the report layout.
@@ -256,6 +261,7 @@ curl -X POST localhost:3000/api/repos/sapphire-paratime/reviews \
   "durationSecs": 231,
   "lines": 19200,
   "filesScanned": 80,
+  "agentVersion": "hermes-agent 1.4.2",
   "nextRunAt": "2026-06-18T18:00:00Z",
   "findings": [
     {
@@ -263,6 +269,8 @@ curl -X POST localhost:3000/api/repos/sapphire-paratime/reviews \
       "title": "Reentrancy in withdraw()",
       "file": "contracts/ConfidentialVault.sol",
       "line": 142,
+      "ruleId": "reentrancy-eth",
+      "locationKey": "ConfidentialVault.withdraw",
       "cwe": "CWE-841",
       "description": "Balance updated after an external call.",
       "code": "(bool ok,) = msg.sender.call{value: amt}(\"\");\nbal[msg.sender] -= amt;",
@@ -274,28 +282,85 @@ curl -X POST localhost:3000/api/repos/sapphire-paratime/reviews \
 ```
 
 `severity` is one of `crit` | `high` | `med` | `low`. `commit` and each
-finding's `severity` + `title` are required; everything else is optional.
+finding's `severity` + `title` are required; everything else is optional. The
+numeric fields (`durationSecs`, `lines`, `filesScanned`, a finding's `line`) must
+be non-negative integers, and `findings`, when present, must be an array. A
+malformed body is a 400 and stores nothing.
+
+`model`, `engine`, `trigger` and `agentVersion` are stored as sent; one the agent
+leaves out is stored empty, never a guessed value (the report shows "—" for an
+empty `engine`/`trigger` and omits an empty `model`/`agentVersion`). Without a
+`summary`, the report shows a one-line summary built from the review's own data
+(issue counts by severity, files, engine, model).
+
+Every finding is stored. Findings that share an **identity** (see
+[Finding identity](#finding-identity)) are one issue with several locations, shown
+as e.g. "2 locations: L88, L140"; only exact duplicates (same identity at the same
+line + `locationKey`) collapse, keeping the most severe.
 
 A commit can be scanned more than once — LLM reviews are non-deterministic, and you
 may run several models against the same code. Submits are therefore idempotent on
 scan **content**, not on `(repo, commit)`. The content key is `commit` + `model` +
-`engine` + the finding set, where each finding contributes only its `severity` +
-`file` + `title` (the same identity used for the new/carried/resolved diff). A
+`engine` + the issue set, where each issue contributes only its identity and most
+severe `severity` (the same identity used for the new/carried/resolved diff). A
 resubmit with the same key returns the existing review (`duplicate: true`, HTTP 200);
 a re-run that finds a different issue, drops one, changes a severity, or runs a
 different `model` is stored as its own review. Note the key ignores a finding's
 `line`/`description`/`recommendation`/`code`, so a retry that only rewords those (or
 moves a line) dedups to the first report. Each scan shows up as its own row, newest
-first, with its `model`. A repo's headline status unions the findings across **all**
+first, with its `model`. A repo's headline status unions the issues across **all**
 scans of its current commit, so an issue one model flagged isn't hidden because a
 later model missed it.
 
-`nextRunAt` (epoch-ms or ISO-8601) tells the dashboard when the agent plans to run
-next; it's rendered as **Next run** on the overview. The schedule is agent-driven —
-there is no fixed cadence. The dashboard shows "unscheduled" until the agent first
-reports a value. The last reported next run then **persists**: omitting `nextRunAt`
-on a later submit keeps the previous value, and sending `nextRunAt: 0` clears it back
-to "unscheduled".
+`nextRunAt` (epoch-ms or ISO-8601; 10-digit epoch seconds are rejected with 400)
+tells the dashboard when the agent plans to run next; it's rendered as **Next
+run** on the overview. The schedule is agent-driven — there is no fixed cadence.
+The dashboard shows "unscheduled" until the agent first reports a value. The last
+reported next run then **persists**: omitting `nextRunAt` on a later submit keeps
+the previous value, and sending `nextRunAt: 0` clears it back to "unscheduled".
+
+### Agent payload contract
+
+What the Hermes agent's scheduled review task must put in each review it posts,
+beyond the required `commit` and per-finding `severity` + `title`. Give this list
+to the task prompt verbatim:
+
+- **`agentVersion`** (review): the agent's own version string, e.g.
+  `hermes-agent 1.4.2`. Send it on every review.
+- **`ruleId`** (each finding): the id of the tool rule or detector that raised
+  the finding, copied exactly from the tool output: a slither detector name
+  (`reentrancy-eth`), a semgrep `check_id`, etc. Omit it when no tool raised the
+  finding (an LLM-only observation); don't invent ids.
+- **`locationKey`** (each finding): the function or symbol that contains the
+  finding, e.g. `ConfidentialVault.withdraw`, `crate::vault::withdraw`,
+  `(*Server).Handle`. Name the symbol, not the line: lines shift between commits,
+  the symbol doesn't. Omit it for file-level findings (pragma, config).
+
+`ruleId` + `file` + `locationKey` become the finding's identity (see below), so
+the same issue must get the same values on every run.
+
+Each is a string of at most 200 characters after trimming; a wrong type or a
+longer value is a 400. All three are optional, and payloads without them keep
+working.
+
+### Finding identity
+
+Each finding gets an identity, the `fingerprint` the new/carried/resolved diff,
+the counts, the commit union and triage tags all key on:
+
+- **With a `ruleId`**: `ruleId` + `file` + `locationKey`. The title is not part of
+  it, so an LLM rewording a title between runs, or the code moving down a few
+  lines, keeps the issue (and its triage tag). The same rule in two functions is
+  two issues; the same rule twice in one function, or twice in a file without a
+  `locationKey`, is one issue with two locations.
+- **Without a `ruleId`**: `file` + `title`, the key every finding had before these
+  fields existed. Old findings and their triage tags keep their keys; nothing is
+  re-keyed. A `locationKey` alone is shown but doesn't split issues.
+
+Each component is trimmed and compared case-insensitively. When the agent starts
+sending `ruleId`, those findings move to new identities once: on that commit they
+show as new, the old file + title issues as resolved, and earlier triage tags don't
+carry over to them (re-tag the ones that still apply).
 
 ### Read reviews / trends
 
@@ -309,10 +374,13 @@ curl 'localhost:3000/api/trends?days=30'
 curl 'localhost:3000/api/trends?days=14&repo=sapphire-paratime'
 ```
 
-`GET /api/reviews` accepts `repo`, `since`/`until` (epoch-ms or ISO-8601), and
-`limit` (1..1000, default 200). `GET /api/trends` accepts `days` (1..365,
-default 14) and optional `repo`; each bucket is
-`{ day, date, newFindings, resolvedFindings, reviews }`.
+`GET /api/reviews` accepts `repo`, `since`/`until`, and `limit` (1..1000, default
+200). `GET /api/trends` accepts `days` (1..365, default 14) and optional `repo`;
+each bucket is `{ day, date, newFindings, resolvedFindings, reviews }`.
+
+`since`/`until` take epoch-ms (12+ digits), a 4-digit year (`2024` = Jan 1 2024,
+UTC), or ISO-8601. A 10-digit value is epoch seconds and is rejected with 400
+rather than being read as a date in January 1970.
 
 ### Update the active run
 
@@ -326,6 +394,11 @@ curl -X PUT localhost:3000/api/scan -H 'content-type: application/json' -d '{
 # clear when finished
 curl -X PUT localhost:3000/api/scan -H 'content-type: application/json' -d '{ "active": false }'
 ```
+
+While `active` is true, `repoId` must name a registered repo (the banner links to
+it); an unknown one is a 400. `progress` is an integer, clamped to 0–100;
+`startedAt` is integer epoch-ms; `repoId`/`commit`/`currentFile`/`engine` are
+strings (or null). A field of the wrong type is a 400.
 
 ### Triage a finding
 
@@ -356,7 +429,10 @@ The endpoints `GET /api/repos/:id/rerun` and `POST /api/repos/:id/rerun` record 
 `node:sqlite` tables: `repos`, `reviews`, `findings`, `scan` (singleton live
 run), `meta` (`data_version`, next run, org label, etc.). SQLite triggers increment
 `meta.data_version` on every write (repo, review, triage, or scan state transition).
-Findings carry a stable `fingerprint` (`file` + `title`) so the same issue is tracked
-run-over-run — that's what powers the new/carried/resolved diff and per-finding age ("open N runs").
-access lives in `src/lib/server/` (`db.ts`, `store.ts`, `seed.ts`,
-`sanitize.ts`, `auth.ts`).
+Each finding row is one location of an issue; rows of the same issue share a stable
+`fingerprint` (its [identity](#finding-identity)) so the issue is tracked run-over-run —
+that's what powers the new/carried/resolved diff and per-finding age ("open N runs"). Server data
+access lives in `src/lib/server/`: `db.ts` (connection) and `migrations.ts` (versioned
+schema), one module per domain (`repos.ts`, `commits.ts`, `reviews.ts`, `ingest.ts`,
+`triage.ts`, `overview.ts`, `trends.ts`, `scan.ts`, `meta.ts`), plus `seed.ts`,
+`durability.ts`, `sanitize.ts` and `auth.ts`.

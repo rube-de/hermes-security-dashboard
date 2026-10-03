@@ -43,36 +43,54 @@ describe('readInt', () => {
 });
 
 describe('parseTimeValue', () => {
-	it('returns null for null, undefined, empty, or whitespace', () => {
-		expect(parseTimeValue(null)).toBeNull();
-		expect(parseTimeValue(undefined)).toBeNull();
-		expect(parseTimeValue('')).toBeNull();
-		expect(parseTimeValue('   ')).toBeNull();
+	const invalid = { ok: false, error: 'x must be an epoch-ms number or ISO-8601 date' };
+	const seconds = {
+		ok: false,
+		error: 'x looks like epoch seconds (10 digits); send epoch-ms or an ISO-8601 date'
+	};
+
+	it('rejects non-time inputs, including whitespace-only strings', () => {
+		expect(parseTimeValue(null, 'x')).toEqual(invalid);
+		expect(parseTimeValue(undefined, 'x')).toEqual(invalid);
+		expect(parseTimeValue('   ', 'x')).toEqual(invalid);
+		expect(parseTimeValue(true, 'x')).toEqual(invalid);
+		expect(parseTimeValue('invalid-date', 'x')).toEqual(invalid);
 	});
 
-	it('returns finite numbers as-is', () => {
-		expect(parseTimeValue(1700000000000)).toBe(1700000000000);
-		expect(parseTimeValue(NaN)).toBeNull();
-		expect(parseTimeValue(Infinity)).toBeNull();
+	it('takes integer numbers as epoch-ms, including 0', () => {
+		expect(parseTimeValue(1700000000000, 'x')).toEqual({ ok: true, value: 1700000000000 });
+		expect(parseTimeValue(0, 'x')).toEqual({ ok: true, value: 0 });
+	});
+
+	it('rejects non-integer numbers', () => {
+		expect(parseTimeValue(1700000000000.5, 'x')).toEqual(invalid);
+		expect(parseTimeValue(NaN, 'x')).toEqual(invalid);
+		expect(parseTimeValue(Infinity, 'x')).toEqual(invalid);
 	});
 
 	it('parses ISO-8601 date strings', () => {
 		const iso = '2024-01-01T00:00:00.000Z';
-		const expected = Date.parse(iso);
-		expect(parseTimeValue(iso)).toBe(expected);
+		expect(parseTimeValue(iso, 'x')).toEqual({ ok: true, value: Date.parse(iso) });
 	});
 
-	// KNOWN-WRONG (R3, fixed by T06): ?since=2024 is parsed as epoch ms
-	it('parses digits-only strings as epoch-ms number directly (KNOWN-WRONG: R3)', () => {
-		// "2024" is parsed as Number("2024") = 2024 ms after epoch, not Jan 1 2024.
-		expect(parseTimeValue('2024')).toBe(2024);
-
-		// 10-digit epoch seconds string "1700000000" is also treated as 1700000000 ms (1970).
-		expect(parseTimeValue('1700000000')).toBe(1700000000);
+	it('reads digits-only strings with 12 or more digits as epoch-ms', () => {
+		expect(parseTimeValue('1700000000000', 'x')).toEqual({ ok: true, value: 1700000000000 });
+		expect(parseTimeValue(' 100000000000 ', 'x')).toEqual({ ok: true, value: 100000000000 });
 	});
 
-	it('returns null for invalid date strings', () => {
-		expect(parseTimeValue('invalid-date')).toBeNull();
+	it('reads a 4-digit string as Jan 1 of that year, UTC (R3)', () => {
+		expect(parseTimeValue('2024', 'x')).toEqual({ ok: true, value: Date.UTC(2024, 0, 1) });
+	});
+
+	it('rejects 10-digit epoch seconds, as a string or a number', () => {
+		expect(parseTimeValue('1700000000', 'x')).toEqual(seconds);
+		expect(parseTimeValue(1700000000, 'x')).toEqual(seconds);
+	});
+
+	it('rejects digit strings that Date.parse would turn into nonsense years', () => {
+		for (const s of ['0', '12', '99999', '20240101', '12345678901']) {
+			expect(parseTimeValue(s, 'x')).toEqual(invalid);
+		}
 	});
 });
 
@@ -98,5 +116,13 @@ describe('readTime', () => {
 		if (!res.ok) {
 			expect(res.error).toBe('`since` must be an epoch-ms number or ISO-8601 date');
 		}
+	});
+
+	it('names the param when rejecting epoch seconds', () => {
+		const url = new URL('http://localhost/api?until=1700000000');
+		expect(readTime(url, 'until')).toEqual({
+			ok: false,
+			error: '`until` looks like epoch seconds (10 digits); send epoch-ms or an ISO-8601 date'
+		});
 	});
 });

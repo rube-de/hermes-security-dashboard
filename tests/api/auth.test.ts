@@ -46,16 +46,32 @@ describe('auth (checkWriteAuth)', () => {
 			headers: { authorization: 'Bearer wrong-token' }
 		});
 		expect(checkWriteAuth(reqWrong)?.status).toBe(401);
+
+		const reqSameLength = new Request('http://localhost/api/repos', {
+			method: 'POST',
+			headers: { authorization: 'Bearer secret-token-124' }
+		});
+		expect(checkWriteAuth(reqSameLength)?.status).toBe(401);
 	});
 
-	// KNOWN-WRONG (S1, fixed by T06): checkWriteAuth uses loose !== comparison instead of timingSafeEqual
-	it('allows requests with valid Bearer token (KNOWN-WRONG: S1 non-constant-time comparison)', () => {
+	it('allows requests with the configured Bearer token', () => {
 		process.env.HERMES_API_TOKEN = 'secret-token-123';
 		const req = new Request('http://localhost/api/repos', {
 			method: 'POST',
 			headers: { authorization: 'Bearer secret-token-123' }
 		});
-		const denied = checkWriteAuth(req);
-		expect(denied).toBeNull();
+		expect(checkWriteAuth(req)).toBeNull();
+	});
+
+	it('returns 401, not a throw, when the presented token differs in length (S1)', () => {
+		process.env.HERMES_API_TOKEN = 'secret-token-123';
+		for (const presented of ['secret', 'secret-token-1234', 'secret-token-12é']) {
+			// 'secret-token-12é' has the token's character count but one more UTF-8 byte.
+			const req = new Request('http://localhost/api/repos', {
+				method: 'POST',
+				headers: { authorization: `Bearer ${presented}` }
+			});
+			expect(checkWriteAuth(req)?.status).toBe(401);
+		}
 	});
 });

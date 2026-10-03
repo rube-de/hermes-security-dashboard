@@ -67,7 +67,7 @@ export function setScan(input: ScanInput): ScanState {
 		input.commit ?? null,
 		input.currentFile ?? null,
 		Math.max(0, Math.min(100, input.progress ?? 0)),
-		input.engine ?? 'slither+semgrep+llm',
+		input.engine ?? null,
 		startedAt
 	);
 	return getScan();
