@@ -158,7 +158,7 @@ Point the sync sidecar at the snapshot file (default `${HERMES_DB}.snapshot`),
 | ------------------------------ | ---------------------------------------------------------- |
 | `/`                            | Overview — totals by severity, run strip, trend, repo list with search + status/severity filters |
 | `/repo/[id]`                   | Repo detail — metric summary, live scan banner, review history |
-| `/repo/[id]/review/[reviewId]` | Review report — severity band, summary, diff vs previous run, findings with code + remediation, resolved section |
+| `/repo/[id]/review/[reviewId]` | Review report — counted severity filters, findings index and permalinks, summary, diff, expandable findings with source links + remediation, resolved section |
 
 UI pages read directly from the database via server `load`. The active-run
 banner polls `GET /api/scan`, which returns the live scan state along with
@@ -169,6 +169,20 @@ Times are formatted in the browser: absolute times in its local time zone (hover
 one for the full date and zone name), relative ones ("2h 14m ago", "in 3h") on a
 shared 30-second clock, so they stay current without a reload. Server-rendered
 HTML shows UTC times until the page hydrates.
+
+Reports have a sticky findings sidebar, replaced by a top bar below 900px.
+New findings start expanded; carried findings and any finding with a triage
+verdict start collapsed. “Show triaged” includes false positives and accepted
+risks in the list; acknowledged findings remain visible and actionable.
+Filter counts describe the eligible list, while the report's severity band
+always excludes false positives and accepted risks. Both update after on-page
+triage edits.
+
+Each finding has a copyable `#<fingerprint>` permalink. Opening one expands and
+reveals the finding, clearing a conflicting severity filter and enabling
+“Show triaged” when needed. Each reported file location links to GitHub at the
+reviewed commit; repository/commit links and numeric CWE links open GitHub or
+MITRE in a new tab.
 
 ## Agent API
 

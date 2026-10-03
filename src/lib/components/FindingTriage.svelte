@@ -14,7 +14,7 @@
 		fingerprint: string;
 		severity?: Severity;
 		current: Triage | null;
-		onChanged: (t: Triage | null) => void;
+		onChanged: (t: Triage | null, restoreFocus: boolean) => void;
 	} = $props();
 
 	let open = $state(false);
@@ -52,6 +52,7 @@
 			return;
 		}
 
+		const restoreFocus = triggerEl?.parentElement?.contains(document.activeElement) ?? false;
 		busy = true;
 		try {
 			const res = await fetch(`${base}/api/repos/${repoId}/findings/${fingerprint}/triage`, {
@@ -65,7 +66,7 @@
 				return;
 			}
 			if (status === 'open') {
-				onChanged(null);
+				onChanged(null, restoreFocus);
 			} else {
 				const body = (await res.json().catch(() => ({}))) as { triagedBy?: string };
 				const now = Date.now();
@@ -75,7 +76,7 @@
 					triagedBy: body.triagedBy || current?.triagedBy || 'unknown',
 					createdAt: current?.createdAt ?? now,
 					updatedAt: now
-				});
+				}, restoreFocus);
 			}
 			open = false;
 		} catch {
