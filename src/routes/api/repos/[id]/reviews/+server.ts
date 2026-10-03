@@ -3,7 +3,7 @@ import { getRepoDetail } from '$lib/server/repos';
 import { insertReview, type FindingInput } from '$lib/server/ingest';
 import { setNextRun } from '$lib/server/meta';
 import { checkWriteAuth } from '$lib/server/auth';
-import { parseTimeValue } from '$lib/server/params';
+import { intField, parseTimeValue, readJsonObject } from '$lib/server/params';
 import type { Severity } from '$lib/types';
 import type { RequestHandler } from './$types';
 
@@ -38,12 +38,9 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		return json({ error: `repository "${params.id}" not found — register it first` }, { status: 404 });
 	}
 
-	let body: Record<string, unknown>;
-	try {
-		body = await request.json();
-	} catch {
-		return json({ error: 'invalid JSON body' }, { status: 400 });
-	}
+	const parsed = await readJsonObject(request);
+	if (!parsed.ok) return json({ error: parsed.error }, { status: 400 });
+	const body = parsed.value;
 
 	const commit = typeof body.commit === 'string' ? body.commit.trim() : '';
 	if (!commit) return json({ error: '`commit` (string) is required' }, { status: 400 });
@@ -52,21 +49,30 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	// persist it whenever supplied, including on an idempotent re-submit below.
 	let nextRunAt: number | null = null;
 	if (body.nextRunAt !== undefined && body.nextRunAt !== null && body.nextRunAt !== '') {
-		nextRunAt = parseTimeValue(body.nextRunAt);
-		if (nextRunAt === null) {
-			return json(
-				{ error: '`nextRunAt` must be an epoch-ms number or ISO-8601 date' },
-				{ status: 400 }
-			);
-		}
+		const t = parseTimeValue(body.nextRunAt, '`nextRunAt`');
+		if (!t.ok) return json({ error: t.error }, { status: 400 });
+		nextRunAt = t.value;
 	}
 
-	const rawFindings = Array.isArray(body.findings) ? body.findings : [];
+	const numeric: Partial<Record<'durationSecs' | 'lines' | 'filesScanned', number>> = {};
+	for (const k of ['durationSecs', 'lines', 'filesScanned'] as const) {
+		const n = intField(body[k], `\`${k}\``);
+		if (!n.ok) return json({ error: n.error }, { status: 400 });
+		numeric[k] = n.value;
+	}
+
+	// A non-array `findings` would otherwise read as "no findings" and mark the repo clean.
+	if (body.findings !== undefined && body.findings !== null && !Array.isArray(body.findings)) {
+		return json({ error: '`findings` must be an array' }, { status: 400 });
+	}
+	const rawFindings: unknown[] = Array.isArray(body.findings) ? body.findings : [];
 	const findings: FindingInput[] = [];
 	for (let i = 0; i < rawFindings.length; i++) {
-		const f = rawFindings[i] as Record<string, unknown>;
-		if (!f || typeof f !== 'object')
+		const item = rawFindings[i];
+		if (typeof item !== 'object' || item === null)
 			return json({ error: `findings[${i}] must be an object` }, { status: 400 });
+		// Non-null object out of JSON.parse: string keys only.
+		const f = item as Record<string, unknown>;
 		if (!VALID_SEV.has(f.severity as Severity))
 			return json(
 				{ error: `findings[${i}].severity must be one of crit|high|med|low` },
@@ -74,11 +80,13 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			);
 		if (typeof f.title !== 'string' || !f.title.trim())
 			return json({ error: `findings[${i}].title (string) is required` }, { status: 400 });
+		const line = intField(f.line, `findings[${i}].line`);
+		if (!line.ok) return json({ error: line.error }, { status: 400 });
 		findings.push({
 			severity: f.severity as Severity,
 			title: f.title.trim(),
 			file: typeof f.file === 'string' ? f.file : '',
-			line: typeof f.line === 'number' ? f.line : 0,
+			line: line.value ?? 0,
 			cwe: typeof f.cwe === 'string' ? f.cwe : '',
 			description: typeof f.description === 'string' ? f.description : '',
 			code: typeof f.code === 'string' ? f.code : '',
@@ -96,9 +104,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			engine: typeof body.engine === 'string' ? body.engine.trim() : undefined,
 			summary: typeof body.summary === 'string' ? body.summary : undefined,
 			html: typeof body.html === 'string' ? body.html : undefined,
-			durationSecs: typeof body.durationSecs === 'number' ? body.durationSecs : undefined,
-			lines: typeof body.lines === 'number' ? body.lines : undefined,
-			filesScanned: typeof body.filesScanned === 'number' ? body.filesScanned : undefined,
+			...numeric,
 			findings
 		});
 		// Schedule reporting is independent of review idempotency — persist nextRunAt

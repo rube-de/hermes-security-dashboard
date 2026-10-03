@@ -111,7 +111,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RepoDetail' }
         '400':
-          description: Invalid JSON body, or missing `id`/`lang`
+          description: >-
+            Invalid JSON body (or not an object), missing `id`/`lang`, a new `id` that
+            doesn't match `^[A-Za-z0-9._-]{1,100}$`, or a `lines` that isn't a
+            non-negative integer
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -303,7 +306,10 @@ paths:
               schema: { $ref: '#/components/schemas/ReviewSubmitResponse' }
               example: { ok: true, reviewId: 8f3c…, repoId: sapphire-paratime, duplicate: true }
         '400':
-          description: Invalid JSON, missing `commit`, or an invalid finding
+          description: >-
+            Invalid JSON (or not an object), missing `commit`, an invalid finding, a
+            numeric field that isn't a non-negative integer, `findings` that isn't an
+            array, or a malformed `nextRunAt` (including 10-digit epoch seconds)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -330,12 +336,15 @@ paths:
           in: query
           required: false
           schema: { type: string }
-          description: Inclusive lower bound on creation time — epoch-ms or ISO-8601
+          description: Inclusive lower bound on creation time; see the `until` parameter for accepted formats
         - name: until
           in: query
           required: false
           schema: { type: string }
-          description: Inclusive upper bound on creation time — epoch-ms or ISO-8601
+          description: >-
+            Inclusive upper bound on creation time: epoch-ms (12+ digits), a 4-digit
+            year (Jan 1 of that year, UTC, e.g. `2024`), or ISO-8601. A 10-digit value
+            is epoch seconds and is rejected with 400.
         - name: limit
           in: query
           required: false
@@ -347,7 +356,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ReviewsResponse' }
         '400':
-          description: Malformed time, or out-of-bounds/non-integer limit
+          description: Malformed time (including 10-digit epoch seconds), or out-of-bounds/non-integer limit
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -404,7 +413,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ScanState' }
         '400':
-          description: Invalid JSON, or `active` missing/not a boolean
+          description: >-
+            Invalid JSON (or not an object), `active` missing/not a boolean, a field of
+            the wrong type, or an active scan naming an unregistered `repoId`
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -428,7 +439,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ScanState' }
         '400':
-          description: Invalid JSON, or `active` missing/not a boolean
+          description: >-
+            Invalid JSON (or not an object), `active` missing/not a boolean, a field of
+            the wrong type, or an active scan naming an unregistered `repoId`
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -519,14 +532,19 @@ components:
       type: object
       required: [id, lang]
       properties:
-        id: { type: string, description: Unique repository identifier }
+        id:
+          type: string
+          pattern: '^[A-Za-z0-9._-]{1,100}$'
+          description: >-
+            Unique repository identifier, one URL path segment (not `.` or `..`).
+            Repos registered before this rule can still be updated under their old id.
         lang: { type: string, description: 'Primary language (e.g. Solidity, Rust)' }
         description: { type: string, default: '' }
         path:
           type: string
           description: GitHub path; defaults to `oasisprotocol/{id}`
         branch: { type: string, default: main }
-        lines: { type: integer, default: 0 }
+        lines: { type: integer, minimum: 0, default: 0 }
 
     RepoSummary:
       type: object
@@ -646,7 +664,7 @@ components:
         severity: { $ref: '#/components/schemas/Severity' }
         title: { type: string }
         file: { type: string }
-        line: { type: integer }
+        line: { type: integer, minimum: 0 }
         cwe: { type: string, description: e.g. CWE-841 }
         description: { type: string }
         code: { type: string, description: Offending snippet }
@@ -719,22 +737,24 @@ components:
         trigger: { type: string, default: Scheduled }
         engine: { type: string, default: slither+semgrep+llm }
         summary: { type: string, default: '' }
-        durationSecs: { type: integer, default: 0 }
+        durationSecs: { type: integer, minimum: 0, default: 0 }
         lines:
           type: integer
+          minimum: 0
           description: Defaults to the repo's registered line count if omitted
-        filesScanned: { type: integer, default: 0 }
+        filesScanned: { type: integer, minimum: 0, default: 0 }
         html:
           type: string
           description: Optional pre-rendered report body; sanitized server-side
         nextRunAt:
           type: [integer, string]
           description: >-
-            When the agent plans its next review run — epoch-ms or ISO-8601. Shown
-            as the dashboard "Next run". The schedule is agent-driven/flexible; there
-            is no fixed cadence. Persists until the agent reports a new value:
-            omitting it keeps the last reported next run; send 0 to clear it back to
-            "unscheduled".
+            When the agent plans its next review run — epoch-ms (an integer, or a
+            digits-only string of 12+ digits) or ISO-8601. 10-digit epoch seconds are
+            rejected with 400. Shown as the dashboard "Next run". The schedule is
+            agent-driven/flexible; there is no fixed cadence. Persists until the agent
+            reports a new value: omitting it keeps the last reported next run; send 0
+            to clear it back to "unscheduled".
         findings:
           type: array
           items: { $ref: '#/components/schemas/FindingInput' }
@@ -780,12 +800,16 @@ components:
       required: [active]
       properties:
         active: { type: boolean, description: 'true during a scan, false when complete' }
-        repoId: { type: string }
-        commit: { type: string }
-        currentFile: { type: string }
-        progress: { type: number, description: 0–100; defaults to 0 }
-        engine: { type: string }
-        startedAt: { type: integer, description: Epoch-ms }
+        repoId:
+          type: [string, 'null']
+          description: Must be a registered repository while `active` is true (else 400)
+        commit: { type: [string, 'null'] }
+        currentFile: { type: [string, 'null'] }
+        progress:
+          type: integer
+          description: 0–100; out-of-range integers are clamped, non-integers are a 400. Defaults to 0.
+        engine: { type: [string, 'null'] }
+        startedAt: { type: integer, minimum: 0, description: Epoch-ms; defaults to now }
 
     TrendBucket:
       type: object

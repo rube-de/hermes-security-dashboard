@@ -223,6 +223,11 @@ curl -X POST localhost:3000/api/repos -H 'content-type: application/json' -d '{
 }'
 ```
 
+A new `id` must be a single URL path segment matching `^[A-Za-z0-9._-]{1,100}$`
+(and not `.` or `..`); anything else is a 400. Repos registered before this rule
+keep working and can still be updated under their old id. `lines` must be a
+non-negative integer.
+
 ### Submit a review report
 
 `findings` is the structured form the dashboard renders into the report layout.
@@ -260,7 +265,10 @@ curl -X POST localhost:3000/api/repos/sapphire-paratime/reviews \
 ```
 
 `severity` is one of `crit` | `high` | `med` | `low`. `commit` and each
-finding's `severity` + `title` are required; everything else is optional.
+finding's `severity` + `title` are required; everything else is optional. The
+numeric fields (`durationSecs`, `lines`, `filesScanned`, a finding's `line`) must
+be non-negative integers, and `findings`, when present, must be an array. A
+malformed body is a 400 and stores nothing.
 
 A commit can be scanned more than once — LLM reviews are non-deterministic, and you
 may run several models against the same code. Submits are therefore idempotent on
@@ -276,12 +284,12 @@ first, with its `model`. A repo's headline status unions the findings across **a
 scans of its current commit, so an issue one model flagged isn't hidden because a
 later model missed it.
 
-`nextRunAt` (epoch-ms or ISO-8601) tells the dashboard when the agent plans to run
-next; it's rendered as **Next run** on the overview. The schedule is agent-driven —
-there is no fixed cadence. The dashboard shows "unscheduled" until the agent first
-reports a value. The last reported next run then **persists**: omitting `nextRunAt`
-on a later submit keeps the previous value, and sending `nextRunAt: 0` clears it back
-to "unscheduled".
+`nextRunAt` (epoch-ms or ISO-8601; 10-digit epoch seconds are rejected with 400)
+tells the dashboard when the agent plans to run next; it's rendered as **Next
+run** on the overview. The schedule is agent-driven — there is no fixed cadence.
+The dashboard shows "unscheduled" until the agent first reports a value. The last
+reported next run then **persists**: omitting `nextRunAt` on a later submit keeps
+the previous value, and sending `nextRunAt: 0` clears it back to "unscheduled".
 
 ### Read reviews / trends
 
@@ -295,10 +303,13 @@ curl 'localhost:3000/api/trends?days=30'
 curl 'localhost:3000/api/trends?days=14&repo=sapphire-paratime'
 ```
 
-`GET /api/reviews` accepts `repo`, `since`/`until` (epoch-ms or ISO-8601), and
-`limit` (1..1000, default 200). `GET /api/trends` accepts `days` (1..365,
-default 14) and optional `repo`; each bucket is
-`{ day, date, newFindings, resolvedFindings, reviews }`.
+`GET /api/reviews` accepts `repo`, `since`/`until`, and `limit` (1..1000, default
+200). `GET /api/trends` accepts `days` (1..365, default 14) and optional `repo`;
+each bucket is `{ day, date, newFindings, resolvedFindings, reviews }`.
+
+`since`/`until` take epoch-ms (12+ digits), a 4-digit year (`2024` = Jan 1 2024,
+UTC), or ISO-8601. A 10-digit value is epoch seconds and is rejected with 400
+rather than being read as a date in January 1970.
 
 ### Update the active run
 
@@ -312,6 +323,11 @@ curl -X PUT localhost:3000/api/scan -H 'content-type: application/json' -d '{
 # clear when finished
 curl -X PUT localhost:3000/api/scan -H 'content-type: application/json' -d '{ "active": false }'
 ```
+
+While `active` is true, `repoId` must name a registered repo (the banner links to
+it); an unknown one is a 400. `progress` is an integer, clamped to 0–100;
+`startedAt` is integer epoch-ms; `repoId`/`commit`/`currentFile`/`engine` are
+strings (or null). A field of the wrong type is a 400.
 
 ## Data model
 

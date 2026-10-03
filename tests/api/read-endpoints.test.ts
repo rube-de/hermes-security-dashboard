@@ -183,6 +183,34 @@ describe('API Read Endpoints', () => {
 			});
 			expect(badLimit.status).toBe(400);
 		});
+
+		it('reads ?since=2024 as Jan 1 2024 UTC (R3)', async () => {
+			insertReview(repoId, {
+				commit: 'c-2023',
+				createdAt: Date.UTC(2023, 11, 31, 23, 59),
+				findings: []
+			});
+			insertReview(repoId, {
+				commit: 'c-2024',
+				createdAt: Date.UTC(2024, 0, 1, 0, 1),
+				findings: []
+			});
+			const res = await callApi<ReviewsListResponse>(getReviews, {
+				url: 'http://localhost/api/reviews?since=2024&until=2025'
+			});
+			expect(res.status).toBe(200);
+			expect(res.body.reviews.map((r) => r.commit)).toEqual(['c-2024']);
+		});
+
+		it('returns 400 with an explicit error for epoch seconds', async () => {
+			const res = await callApi<ErrorResponse>(getReviews, {
+				url: 'http://localhost/api/reviews?since=1700000000'
+			});
+			expect(res.status).toBe(400);
+			expect(res.body.error).toBe(
+				'`since` looks like epoch seconds (10 digits); send epoch-ms or an ISO-8601 date'
+			);
+		});
 	});
 
 	describe('GET /api/reviews/[id]', () => {
