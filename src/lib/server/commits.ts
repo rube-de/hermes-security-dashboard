@@ -55,7 +55,7 @@ export function unionFindingsForCommit(repoId: string, commit: string): UnionFin
 			   FROM findings f JOIN reviews r ON f.review_id = r.id
 			  WHERE r.repo_id = ? AND r.commit_hash = ?`
 		)
-		.all(repoId, commit) as UnionFinding[];
+		.all(repoId, commit) as unknown as UnionFinding[];
 	return worstPerIssue(rows);
 }
 
