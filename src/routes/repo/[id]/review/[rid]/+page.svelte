@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { SEV_LABEL, SEV_VAR, SEV_BG_VAR, TRIAGE_LABEL } from '$lib/format';
+	import { SEVERITIES, SEV_LABEL, SEV_VAR, SEV_BG_VAR, TRIAGE_LABEL } from '$lib/format';
 	import FindingTriage from '$lib/components/FindingTriage.svelte';
 	import type { Triage } from '$lib/types';
 	import type { PageData } from './$types';
@@ -22,13 +22,29 @@
 		return !!t && (t.status === 'false_positive' || t.status === 'accepted_risk');
 	}
 
-	const summaryText = $derived(
-		review.summary ||
-			`Hermes completed a static and LLM-assisted review of ${repo.id} at commit ${review.commit}, ` +
-				`covering ${review.lines.toLocaleString('en-US')} lines across ${review.filesScanned} files. ` +
-				`The findings below are ordered by severity. Each includes the affected location, an impact ` +
-				`assessment, and a recommended remediation.`
-	);
+	// Without an agent summary, a one-line summary built only from the review's own data:
+	// issue counts by severity, files, and the engine/model the agent reported.
+	const summaryText = $derived.by(() => {
+		if (review.summary) return review.summary;
+		const n = review.findings.length;
+		const files = new Set(review.findings.flatMap((f) => f.locations.map((l) => l.file)).filter(Boolean))
+			.size;
+		const bySeverity = SEVERITIES.map((s) => {
+			const c = review.findings.filter((f) => f.severity === s).length;
+			return c > 0 ? `${c} ${SEV_LABEL[s].toLowerCase()}` : '';
+		}).filter(Boolean);
+		const parts = [
+			n === 0
+				? 'No findings'
+				: `${n} finding${n === 1 ? '' : 's'} (${bySeverity.join(', ')})` +
+					(files > 0 ? ` across ${files} file${files === 1 ? '' : 's'}` : '')
+		];
+		if (review.filesScanned > 0)
+			parts.push(`${review.filesScanned.toLocaleString('en-US')} files scanned`);
+		if (review.engine) parts.push(`engine ${review.engine}`);
+		if (review.model) parts.push(`model ${review.model}`);
+		return parts.join(' · ');
+	});
 
 	function lifeText(f: PageData['review']['findings'][number]) {
 		if (f.isNew) return 'New this run';
@@ -68,13 +84,17 @@
 		<div class="rhead">
 			<div class="badge">
 				<div class="badge-ring"><span class="badge-dot"></span></div>
-				<span class="mono">Hermes Security Review · hermes v2.4.1</span>
+				<span class="mono"
+					>Hermes Security Review{review.agentVersion ? ` · ${review.agentVersion}` : ''}</span
+				>
 			</div>
 			<h1 class="display">Security Review Report</h1>
 			<div class="rmeta mono">
 				<span><span class="k">repository</span> {repo.path}</span>
 				<span><span class="k">commit</span> <span class="commit">{review.commit}</span></span>
 				{#if review.model}<span><span class="k">model</span> {review.model}</span>{/if}
+				<span><span class="k">engine</span> {review.engine || '—'}</span>
+				<span><span class="k">trigger</span> {review.trigger || '—'}</span>
 				<span><span class="k">generated</span> {review.dateLabel}</span>
 				<span><span class="k">duration</span> {review.durationLabel}</span>
 				<span><span class="k">lines</span> {review.lines.toLocaleString('en-US')}</span>
@@ -209,7 +229,6 @@
 			{/if}
 
 			<div class="scope mono">
-				<div>scope · static analysis (slither, semgrep) + LLM contextual review</div>
 				<div>
 					report generated automatically by Hermes · findings should be triaged by a human reviewer
 					before remediation

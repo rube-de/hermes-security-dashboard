@@ -620,7 +620,7 @@ components:
         prevCommit:
           type: [string, 'null']
           description: Previous commit used for the diff, or null
-        trigger: { type: string, description: 'e.g. Scheduled, Push to main' }
+        trigger: { type: string, description: "e.g. Scheduled, Push to main; '' when unreported" }
         createdAt: { type: integer, description: Epoch-ms }
         dateLabel: { type: string }
         agoLabel: { type: string }
@@ -640,7 +640,7 @@ components:
             [engine, agentVersion, summary, lines, filesScanned, findings, quietedCount, resolved,
              diff, hasPrev]
           properties:
-            engine: { type: string, description: e.g. slither+semgrep+llm }
+            engine: { type: string, description: "e.g. slither+semgrep+llm; '' when unreported" }
             agentVersion:
               type: string
               description: Version of the agent that produced the review; '' when unreported.
@@ -786,9 +786,22 @@ components:
             Distinct from `engine` (the static-analysis tool stack). Part of the
             dedup identity, so two models scanning the same commit are kept as
             separate reviews. Shown per row on the repo's review history.
-        trigger: { type: string, default: Scheduled }
-        engine: { type: string, default: slither+semgrep+llm }
-        summary: { type: string, default: '' }
+        trigger:
+          type: string
+          default: ''
+          description: What started the run, e.g. Scheduled. Stored as sent; omitted = '' (shown as —).
+        engine:
+          type: string
+          default: ''
+          description: >-
+            Static-analysis tool stack, e.g. slither+semgrep+llm. Part of the dedup
+            identity. Stored as sent (trimmed); omitted = '' (shown as —).
+        summary:
+          type: string
+          default: ''
+          description: >-
+            Executive summary. When empty, the report shows a line built from the
+            review's own data (issue counts, files, engine, model).
         durationSecs: { type: integer, minimum: 0, default: 0 }
         lines:
           type: integer
@@ -800,7 +813,8 @@ components:
           maxLength: 200
           description: >-
             Version of the agent that produced the review (e.g. `hermes-agent 1.4.2`).
-            Returned on the review detail. Not part of the dedup identity.
+            Returned on the review detail and shown on the report only when sent. Not
+            part of the dedup identity.
             Trimmed; null or omitted = not sent.
         html:
           type: string

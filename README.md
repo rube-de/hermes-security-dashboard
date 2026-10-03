@@ -273,6 +273,12 @@ numeric fields (`durationSecs`, `lines`, `filesScanned`, a finding's `line`) mus
 be non-negative integers, and `findings`, when present, must be an array. A
 malformed body is a 400 and stores nothing.
 
+`model`, `engine`, `trigger` and `agentVersion` are stored as sent; one the agent
+leaves out is stored empty, never a guessed value (the report shows "—" for an
+empty `engine`/`trigger` and omits an empty `model`/`agentVersion`). Without a
+`summary`, the report shows a one-line summary built from the review's own data
+(issue counts by severity, files, engine, model).
+
 Every finding is stored. Findings that share an **identity** (see
 [Finding identity](#finding-identity)) are one issue with several locations, shown
 as e.g. "2 locations: L88, L140"; only exact duplicates (same identity at the same

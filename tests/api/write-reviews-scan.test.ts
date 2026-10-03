@@ -237,8 +237,7 @@ describe('POST /api/repos/[id]/reviews', () => {
 		expect(res2.body.reviewId).toBe(res1.body.reviewId);
 	});
 
-	// KNOWN-WRONG (N2/D4, fixed by T10): trigger/engine default to Scheduled and slither+semgrep+llm instead of empty string
-	it('defaults trigger and engine to legacy strings when omitted (KNOWN-WRONG: N2)', async () => {
+	it('stores unreported trigger, engine, summary and agentVersion as empty, not invented values (N2/D4)', async () => {
 		const res = await callApi<ReviewSubmitResponse>(submitReview, {
 			method: 'POST',
 			params: { id: repoId },
@@ -250,8 +249,24 @@ describe('POST /api/repos/[id]/reviews', () => {
 		expect(res.status).toBe(201);
 
 		const detail = getReviewDetail(res.body.reviewId);
-		expect(detail?.trigger).toBe('Scheduled');
-		expect(detail?.engine).toBe('slither+semgrep+llm');
+		expect(detail?.trigger).toBe('');
+		expect(detail?.engine).toBe('');
+		expect(detail?.summary).toBe('');
+		expect(detail?.agentVersion).toBe('');
+		// The history row the repo page renders carries the same empty trigger.
+		expect(listReviews({ repoId })[0].trigger).toBe('');
+	});
+
+	it('stores trigger and engine as sent', async () => {
+		const res = await callApi<ReviewSubmitResponse>(submitReview, {
+			method: 'POST',
+			params: { id: repoId },
+			body: { commit: 'c003', trigger: 'Push to main', engine: ' semgrep ' }
+		});
+		expect(res.status).toBe(201);
+		const detail = getReviewDetail(res.body.reviewId);
+		expect(detail?.trigger).toBe('Push to main');
+		expect(detail?.engine).toBe('semgrep');
 	});
 });
 

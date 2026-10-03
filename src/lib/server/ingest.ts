@@ -61,7 +61,8 @@ export function insertReview(
 	const now = input.createdAt ?? Date.now();
 	const reviewId = randomUUID();
 	const model = input.model ?? '';
-	const engine = input.engine ?? 'slither+semgrep+llm';
+	// Unreported engine/trigger are stored as '' (the UI shows "—"), never a guessed value.
+	const engine = input.engine ?? '';
 	// Store every finding: canonicalFindings() only drops unknown severities and collapses
 	// exact duplicates (same issue identity at the same line + locationKey). Several
 	// locations of one issue are separate rows sharing a `fingerprint` (the identity); the
@@ -140,7 +141,7 @@ export function insertReview(
 			repoId,
 			input.commit,
 			model,
-			input.trigger ?? 'Scheduled',
+			input.trigger ?? '',
 			engine,
 			input.summary ?? '',
 			html,
