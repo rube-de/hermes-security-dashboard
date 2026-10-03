@@ -1,4 +1,5 @@
 import { renameSync, rmSync } from 'node:fs';
+import { backup } from 'node:sqlite';
 import { db, SNAPSHOT_PATH } from './db';
 
 /**
@@ -27,12 +28,22 @@ let timer: ReturnType<typeof setInterval> | null = null;
  * rename it over the snapshot — the sidecar therefore only ever sees a complete
  * database, never a half-written one.
  */
-export function snapshot(): void {
+let inFlightSnapshot: Promise<void> | null = null;
+
+export async function snapshot(): Promise<void> {
 	if (!SNAPSHOT_PATH) return;
-	const tmp = `${SNAPSHOT_PATH}.tmp`;
-	rmSync(tmp, { force: true });
-	db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
-	renameSync(tmp, SNAPSHOT_PATH);
+	if (inFlightSnapshot) return inFlightSnapshot;
+
+	inFlightSnapshot = (async () => {
+		const tmp = `${SNAPSHOT_PATH}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+		rmSync(tmp, { force: true });
+		await backup(db, tmp);
+		renameSync(tmp, SNAPSHOT_PATH);
+	})().finally(() => {
+		inFlightSnapshot = null;
+	});
+
+	return inFlightSnapshot;
 }
 
 /** Fold the WAL back into the main DB so `-wal` doesn't grow without bound. */
@@ -40,10 +51,10 @@ function checkpoint(): void {
 	db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
 }
 
-function tick(): void {
+async function tick(): Promise<void> {
 	try {
 		checkpoint();
-		snapshot();
+		await snapshot();
 	} catch (err) {
 		console.error('[hermes] snapshot tick failed', err);
 	}
@@ -54,13 +65,13 @@ function tick(): void {
  * grace period is cut short) and stop the interval — but do NOT exit. We let
  * adapter-node drain in-flight requests; the close+exit happens in `finalize`.
  */
-function onSignal(reason: string): void {
+async function onSignal(reason: string): Promise<void> {
 	if (signalled) return;
 	signalled = true;
 	if (timer) clearInterval(timer);
 	console.log(`[hermes] ${reason} — snapshotting, awaiting request drain`);
 	try {
-		snapshot();
+		await snapshot();
 	} catch (err) {
 		console.error('[hermes] snapshot on signal failed', err);
 	}
@@ -71,11 +82,11 @@ function onSignal(reason: string): void {
  * server has closed all connections. Captures any writes that landed during the
  * drain, closes the DB, and exits cleanly.
  */
-function finalize(): void {
+async function finalize(): Promise<void> {
 	if (finalized) return;
 	finalized = true;
 	try {
-		snapshot();
+		await snapshot();
 	} catch (err) {
 		console.error('[hermes] final snapshot failed', err);
 	}
