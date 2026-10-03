@@ -14,7 +14,6 @@ export function resetDb(): void {
 	db.exec('DELETE FROM meta;');
 	db.exec('DELETE FROM scan;');
 	db.exec('INSERT INTO scan (id, active) VALUES (1, 0);');
-	db.exec("INSERT INTO meta (key, value) VALUES ('delta_model', 'firstseen');");
 	db.exec('PRAGMA foreign_keys = ON;');
 }
 
