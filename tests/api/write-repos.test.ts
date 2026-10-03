@@ -204,7 +204,7 @@ describe('PUT /api/repos/[id]/findings/[fingerprint]/triage', () => {
 		expect(res.body.note).toBe('Under investigation');
 	});
 
-	// KNOWN-WRONG (E3/D8, fixed by T09): triage does not require note on crit/high or record x-hermes-user
+	// KNOWN-WRONG (E3/D8, fixed by T13): triage does not require note on crit/high or record x-hermes-user
 	it('allows empty note on critical finding (KNOWN-WRONG: E3/D8)', async () => {
 		const res = await callApi<TriageResponse>(updateTriage, {
 			method: 'PUT',

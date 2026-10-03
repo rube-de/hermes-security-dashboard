@@ -172,7 +172,7 @@ describe('POST /api/repos/[id]/reviews', () => {
 		expect(res2.body.reviewId).toBe(res1.body.reviewId);
 	});
 
-	// KNOWN-WRONG (N2, fixed by T06/T10): trigger/engine default to Scheduled and slither+semgrep+llm instead of empty string
+	// KNOWN-WRONG (N2/D4, fixed by T10): trigger/engine default to Scheduled and slither+semgrep+llm instead of empty string
 	it('defaults trigger and engine to legacy strings when omitted (KNOWN-WRONG: N2)', async () => {
 		const res = await callApi<ReviewSubmitResponse>(submitReview, {
 			method: 'POST',
