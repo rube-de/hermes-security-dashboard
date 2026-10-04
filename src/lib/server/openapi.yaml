@@ -17,8 +17,13 @@ info:
     every path below — UI *and* `/api/*` — is served only under that prefix, and
     the root 404s. Pick the matching `servers` entry.
 
-    This document is hand-maintained from the route handlers; it is not generated,
-    so treat the code as the source of truth if they ever diverge.
+    **Raw values.** Read responses carry data, not display text: timestamps are
+    epoch-ms (UTC) and durations are whole seconds. Formatting is the client's job
+    (the dashboard renders them in the browser's local time zone).
+
+    This document is hand-maintained from the route handlers; it is not generated.
+    The test suite checks the read endpoints' responses against these schemas, so
+    the two cannot drift apart unnoticed.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -85,9 +90,12 @@ paths:
       tags: [Repositories]
       operationId: listRepos
       summary: List repository summaries
+      description: >-
+        Sorted by highest open severity, then critical/high issue count, then oldest
+        open critical/high first-seen timestamp. Repository ID breaks remaining ties.
       responses:
         '200':
-          description: All repositories with status from their latest review
+          description: All repositories with status from their head-commit finding union
           content:
             application/json:
               schema:
@@ -111,7 +119,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RepoDetail' }
         '400':
-          description: Invalid JSON body, or missing `id`/`lang`
+          description: >-
+            Invalid JSON body (or not an object), missing `id`/`lang`, a new `id` that
+            doesn't match `^[A-Za-z0-9._-]{1,100}$`, or a `lines` that isn't a
+            non-negative integer
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -122,7 +133,11 @@ paths:
     get:
       tags: [Repositories]
       operationId: getRepo
-      summary: Repository detail with full review history
+      summary: Repository detail with commit-grouped review history
+      description: >-
+        `commits` owns the new/fixed transition between consecutive introduced commits,
+        unioning every scan's issues and excluding quieted triage. The flat `reviews`
+        list is retained for scan-level consumers.
       parameters:
         - $ref: '#/components/parameters/RepoId'
       responses:
@@ -142,6 +157,8 @@ paths:
       tags: [Repositories]
       operationId: getRerun
       summary: Whether a re-run is pending for this repo
+      description: |
+        Note: Requests are never cleared and currently not consumed by the agent.
       parameters:
         - $ref: '#/components/parameters/RepoId'
       responses:
@@ -168,8 +185,8 @@ paths:
       operationId: requestRerun
       summary: Request a re-review on the next Hermes cycle
       description: |
-        Open endpoint (no auth) — it records a user request from the UI; the agent
-        polls it and clears it when it next runs.
+        Open endpoint (no auth) — it records a re-run request for this repository.
+        Note: Requests are never cleared and currently not consumed by the agent.
       parameters:
         - $ref: '#/components/parameters/RepoId'
       responses:
@@ -196,13 +213,22 @@ paths:
       operationId: setFindingTriage
       summary: Set or clear a human triage verdict on a finding
       description: |
-        Open endpoint (no auth) — a dashboard user affordance, not an agent data write.
-        Keyed on the finding's stable fingerprint so the verdict persists across agent
-        re-runs. `status: open` (or null) clears the verdict. Setting a verdict 404s if
-        no finding in the repo currently carries the fingerprint; clearing is idempotent.
+        User affordance for triage verdicts. Keyed on the finding's stable fingerprint
+        so the verdict persists across agent re-runs. `status: open` (or null) clears
+        the verdict. Setting a verdict 404s if no finding in the repo currently carries
+        the fingerprint; clearing is idempotent.
+        Reads identity from `x-hermes-user` header (forwarded by wallet gateway) and
+        records it as `triagedBy` (or 'unknown' when omitted).
+        Dismissing critical or high findings (false_positive or accepted_risk) requires
+        a non-empty note.
       parameters:
         - $ref: '#/components/parameters/RepoId'
         - $ref: '#/components/parameters/Fingerprint'
+        - name: x-hermes-user
+          in: header
+          required: false
+          description: Signed-in user identity forwarded by the wallet gateway
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -230,6 +256,9 @@ paths:
                     type: string
                     enum: [open, acknowledged, false_positive, accepted_risk]
                   note: { type: string }
+                  triagedBy:
+                    type: string
+                    description: Actor who triaged the finding, or 'unknown'
                   cleared:
                     type: boolean
                     description: Present on a clear; whether a row was actually removed
@@ -269,17 +298,26 @@ paths:
       operationId: submitReview
       summary: Submit a security review report
       description: |
+        Every finding is stored; only exact duplicates (same issue identity at the
+        same line + `locationKey`) collapse, to the most severe. Findings sharing an
+        identity are one issue with several locations. Identity is `ruleId` + `file`
+        + `locationKey` when the finding carries a `ruleId` (the title is ignored, so
+        rephrasing keeps it), else the legacy `file` + `title` key; see the
+        `fingerprint` field of Finding.
+
         A commit can be scanned more than once (non-deterministic LLM re-runs,
         different models), so submits are idempotent on scan **content**, not on
-        `(repo, commit)`. The content key is commit + model + engine + the finding
-        set, where each finding contributes only its severity + file + title (a
+        `(repo, commit)`. The content key is commit + model + engine + the issue set,
+        where each issue contributes only its identity + most severe rating (a
         finding's line/description/recommendation/code are not part of the key). A
         resubmit with the same key returns the existing review with `duplicate: true`
-        and HTTP 200; a different finding set, severity, or model creates a new
-        review. The new/carried/resolved diff is a property of the *commit*: only a
-        commit's first scan carries a delta (computed against the union of findings on
-        the previous commit), and re-scans of the same commit report a zero delta so a
-        re-run can't fabricate churn. The repository must be registered first.
+        and HTTP 200; a different issue set, severity, or model creates a new
+        review. Stored scan-level `newCount` counts repository-first discoveries,
+        including issues first found on a re-scan. Stored `resolvedCount` is computed
+        only on a commit's first scan against the previous commit's union. These are
+        scan snapshots, not commit-history deltas: `GET /api/repos/{id}` exposes
+        `commits`, whose new/fixed counts compare consecutive commits' complete unions
+        at read time. The repository must be registered first.
       security:
         - bearerAuth: []
       parameters:
@@ -303,7 +341,10 @@ paths:
               schema: { $ref: '#/components/schemas/ReviewSubmitResponse' }
               example: { ok: true, reviewId: 8f3c…, repoId: sapphire-paratime, duplicate: true }
         '400':
-          description: Invalid JSON, missing `commit`, or an invalid finding
+          description: >-
+            Invalid JSON (or not an object), missing `commit`, an invalid finding, a
+            numeric field that isn't a non-negative integer, `findings` that isn't an
+            array, or a malformed `nextRunAt` (including 10-digit epoch seconds)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -330,12 +371,15 @@ paths:
           in: query
           required: false
           schema: { type: string }
-          description: Inclusive lower bound on creation time — epoch-ms or ISO-8601
+          description: Inclusive lower bound on creation time; see the `until` parameter for accepted formats
         - name: until
           in: query
           required: false
           schema: { type: string }
-          description: Inclusive upper bound on creation time — epoch-ms or ISO-8601
+          description: >-
+            Inclusive upper bound on creation time: epoch-ms (12+ digits), a 4-digit
+            year (Jan 1 of that year, UTC, e.g. `2024`), or ISO-8601. A 10-digit value
+            is epoch seconds and is rejected with 400.
         - name: limit
           in: query
           required: false
@@ -347,7 +391,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ReviewsResponse' }
         '400':
-          description: Malformed time, or out-of-bounds/non-integer limit
+          description: Malformed time (including 10-digit epoch seconds), or out-of-bounds/non-integer limit
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -404,7 +448,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ScanState' }
         '400':
-          description: Invalid JSON, or `active` missing/not a boolean
+          description: >-
+            Invalid JSON (or not an object), `active` missing/not a boolean, a field of
+            the wrong type, or an active scan naming an unregistered `repoId`
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -428,7 +474,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ScanState' }
         '400':
-          description: Invalid JSON, or `active` missing/not a boolean
+          description: >-
+            Invalid JSON (or not an object), `active` missing/not a boolean, a field of
+            the wrong type, or an active scan naming an unregistered `repoId`
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -439,7 +487,11 @@ paths:
     get:
       tags: [Trends]
       operationId: getTrends
-      summary: Daily new/resolved/review aggregates
+      summary: Daily UTC new/resolved/review aggregates
+      description: >-
+        Includes the current UTC day and the preceding days in the requested span.
+        Buckets run from UTC midnight to the next UTC midnight, independent of the
+        server or browser timezone and daylight-saving transitions.
       parameters:
         - name: days
           in: query
@@ -452,7 +504,7 @@ paths:
           description: Scope to a single repository id
       responses:
         '200':
-          description: Continuous, zero-filled daily buckets (oldest first)
+          description: Continuous, zero-filled UTC daily buckets (oldest first)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TrendsResponse' }
@@ -483,7 +535,8 @@ components:
       in: path
       required: true
       schema: { type: string }
-      description: Stable finding identity — the `fingerprint` field of a Finding
+      description: >-
+        Stable issue identity — the `fingerprint` field of a Finding (16 hex chars)
 
   responses:
     Unauthorized:
@@ -519,14 +572,19 @@ components:
       type: object
       required: [id, lang]
       properties:
-        id: { type: string, description: Unique repository identifier }
+        id:
+          type: string
+          pattern: '^[A-Za-z0-9._-]{1,100}$'
+          description: >-
+            Unique repository identifier, one URL path segment (not `.` or `..`).
+            Repos registered before this rule can still be updated under their old id.
         lang: { type: string, description: 'Primary language (e.g. Solidity, Rust)' }
         description: { type: string, default: '' }
         path:
           type: string
           description: GitHub path; defaults to `oasisprotocol/{id}`
         branch: { type: string, default: main }
-        lines: { type: integer, default: 0 }
+        lines: { type: integer, minimum: 0, default: 0 }
 
     RepoSummary:
       type: object
@@ -534,9 +592,8 @@ components:
         Repository with status derived from its current commit (the most recently
         introduced one), unioned across all of that commit's scans.
       required:
-        [id, lang, description, path, branch, lines, langColor, counts, quietedCount, status,
-         statusLabel, clean, glyph, scanning, lastRunLabel, lastDurationLabel, filesScanned,
-         headCommit, headScanCount]
+        [id, lang, description, path, branch, lines, counts, quietedCount, status, clean,
+         scanning, oldestOpenAt, lastRunAt, lastDurationSecs, filesScanned, headCommit, headScanCount]
       properties:
         id: { type: string }
         lang: { type: string }
@@ -544,7 +601,6 @@ components:
         path: { type: string }
         branch: { type: string }
         lines: { type: integer }
-        langColor: { type: string, description: Hex colour for the language }
         counts:
           allOf:
             - $ref: '#/components/schemas/SeverityCounts'
@@ -555,12 +611,20 @@ components:
           type: integer
           description: Head-commit findings hidden from `counts` by triage.
         status: { type: string, enum: [flagged, clean] }
-        statusLabel: { type: string }
         clean: { type: boolean }
-        glyph: { type: string, description: '`[ok]` or `[!!]`' }
         scanning: { type: boolean }
-        lastRunLabel: { type: string }
-        lastDurationLabel: { type: string }
+        oldestOpenAt:
+          type: [integer, 'null']
+          description: >-
+            Earliest first-seen epoch-ms among unresolved critical/high issues in the
+            head-commit finding union, excluding false-positive and accepted-risk triage.
+            Null when no open critical/high issues remain.
+        lastRunAt:
+          type: [integer, 'null']
+          description: Epoch-ms of the current commit's latest scan, or null if never scanned.
+        lastDurationSecs:
+          type: [integer, 'null']
+          description: Duration in seconds of that scan, or null if never scanned.
         filesScanned: { type: integer }
         headCommit:
           type: [string, 'null']
@@ -573,19 +637,70 @@ components:
       allOf:
         - $ref: '#/components/schemas/RepoSummary'
         - type: object
-          required: [reviews]
+          required: [reviews, commits]
           properties:
             reviews:
               type: array
               description: Reviews for this repo, newest first
               items: { $ref: '#/components/schemas/ReviewSummary' }
+            commits:
+              type: array
+              description: >-
+                One group per commit, newest introduced first (first scan time, with
+                first insertion breaking ties). Later re-scans do not reorder commits.
+              items: { $ref: '#/components/schemas/CommitGroup' }
+
+    CommitGroup:
+      type: object
+      description: >-
+        Unioned code-state history. Counts and new/fixed transitions exclude issues
+        quieted by current triage. Deltas compare with the immediately preceding
+        introduced commit's complete union, not a single scan or lifetime sightings;
+        late scans update both affected transitions.
+      required: [commit, createdAt, counts, newCount, fixedCount, scans]
+      properties:
+        commit: { type: string, description: Commit hash reviewed }
+        createdAt: { type: integer, description: Epoch-ms of this commit's first scan }
+        counts:
+          allOf: [{ $ref: '#/components/schemas/SeverityCounts' }]
+          description: >-
+            Union of issues across all scans, one per fingerprint at its worst severity,
+            excluding false-positive and accepted-risk triage.
+        newCount:
+          type: integer
+          description: Issues absent from the preceding union; zero for the oldest commit
+        fixedCount:
+          type: integer
+          description: Issues in the preceding union but absent here; zero for the oldest commit
+        scans:
+          type: array
+          minItems: 1
+          description: Individual scans of this commit, newest first
+          items: { $ref: '#/components/schemas/CommitScan' }
+
+    CommitScan:
+      type: object
+      required: [reviewId, model, createdAt, counts, uniqueCount]
+      properties:
+        reviewId: { type: string, description: Review UUID for the report link }
+        model: { type: string, description: "Model that produced the scan; '' when unreported" }
+        createdAt: { type: integer, description: Epoch-ms when the scan was created }
+        counts:
+          allOf: [{ $ref: '#/components/schemas/SeverityCounts' }]
+          description: Issues in this scan, excluding quieted triage
+        uniqueCount:
+          type: integer
+          description: >-
+            Issues in this scan that no other model found on the same commit,
+            excluding quieted triage. Repeated scans of the same model do not remove
+            model uniqueness; unreported models all share the empty-string bucket.
 
     ReviewSummary:
       type: object
       description: Lightweight review row (no findings).
       required:
-        [id, repoId, commit, model, trigger, createdAt, dateLabel, agoLabel, durationLabel,
-         durationSecs, counts, clean, newCount, resolvedCount, hasDelta]
+        [id, repoId, commit, model, trigger, createdAt, durationSecs, counts, clean, newCount,
+         resolvedCount, hasDelta]
       properties:
         id: { type: string, description: Review UUID }
         repoId: { type: string }
@@ -594,25 +709,31 @@ components:
         prevCommit:
           type: [string, 'null']
           description: Previous commit used for the diff, or null
-        trigger: { type: string, description: 'e.g. Scheduled, Push to main' }
+        trigger: { type: string, description: "e.g. Scheduled, Push to main; '' when unreported" }
         createdAt: { type: integer, description: Epoch-ms }
-        dateLabel: { type: string }
-        agoLabel: { type: string }
-        durationLabel: { type: string }
-        durationSecs: { type: integer }
+        durationSecs: { type: integer, description: Scan duration in seconds }
         counts: { $ref: '#/components/schemas/SeverityCounts' }
         clean: { type: boolean }
-        newCount: { type: integer }
-        resolvedCount: { type: integer }
+        newCount:
+          type: integer
+          description: Repository-first issue discoveries in this scan; may be nonzero on a re-scan
+        resolvedCount:
+          type: integer
+          description: Stored first-scan resolution snapshot against the prior commit union; zero on re-scans
         hasDelta: { type: boolean }
 
     ReviewDetail:
       allOf:
         - $ref: '#/components/schemas/ReviewSummary'
         - type: object
-          required: [engine, summary, lines, filesScanned, findings, quietedCount, resolved, diff, hasPrev]
+          required:
+            [engine, agentVersion, summary, lines, filesScanned, findings, quietedCount, resolved,
+             diff, hasPrev]
           properties:
-            engine: { type: string, description: e.g. slither+semgrep+llm }
+            engine: { type: string, description: "e.g. slither+semgrep+llm; '' when unreported" }
+            agentVersion:
+              type: string
+              description: Version of the agent that produced the review; '' when unreported.
             summary: { type: string }
             lines: { type: integer }
             filesScanned: { type: integer }
@@ -646,18 +767,45 @@ components:
         severity: { $ref: '#/components/schemas/Severity' }
         title: { type: string }
         file: { type: string }
-        line: { type: integer }
+        line: { type: integer, minimum: 0 }
         cwe: { type: string, description: e.g. CWE-841 }
         description: { type: string }
         code: { type: string, description: Offending snippet }
         recommendation: { type: string }
+        ruleId:
+          type: string
+          maxLength: 200
+          description: >-
+            Id of the tool rule or detector that raised the finding (e.g. slither
+            `reentrancy-eth`, a semgrep rule id). When present, the finding's identity
+            is `ruleId` + `file` + `locationKey` instead of `file` + `title`. Trimmed;
+            null or omitted = not sent.
+        locationKey:
+          type: string
+          maxLength: 200
+          description: >-
+            Enclosing function or symbol of the finding (e.g. `Vault.withdraw`). Part of
+            the identity when a `ruleId` is sent; display-only otherwise. Trimmed; null
+            or omitted = not sent.
+
+    FindingLocation:
+      type: object
+      description: One place an issue was reported in a review.
+      required: [file, line, locationKey]
+      properties:
+        file: { type: string }
+        line: { type: integer }
+        locationKey: { type: string, description: "Enclosing symbol; '' when not sent" }
 
     Finding:
       type: object
-      description: A finding as returned in a review report.
+      description: >-
+        An issue in a review report: every finding of the review that shares an
+        identity (`fingerprint`), with the top-level fields taken from its most severe
+        (then earliest-reported) location.
       required:
-        [severity, title, file, line, cwe, description, code, recommendation,
-         isNew, openRuns, ageHours, fingerprint, triage]
+        [severity, title, file, line, cwe, description, code, recommendation, ruleId,
+         locationKey, locations, isNew, openRuns, ageHours, fingerprint, triage]
       properties:
         severity: { $ref: '#/components/schemas/Severity' }
         title: { type: string }
@@ -667,14 +815,25 @@ components:
         description: { type: string }
         code: { type: string }
         recommendation: { type: string }
+        ruleId: { type: string, description: "Agent-reported rule id; '' when not sent" }
+        locationKey: { type: string, description: "Agent-reported enclosing symbol; '' when not sent" }
+        locations:
+          type: array
+          minItems: 1
+          description: >-
+            Every location of this issue in the review, ordered by file then line. More
+            than one when the same issue was reported at several places.
+          items: { $ref: '#/components/schemas/FindingLocation' }
         isNew: { type: boolean }
         openRuns: { type: integer, description: Consecutive scan cycles open }
         ageHours: { type: integer }
         fingerprint:
           type: string
           description: >-
-            Stable per-repo finding identity (sha1 of file+title). The key a triage
-            verdict is attached to and addressed by.
+            Stable per-repo issue identity: a hash of `ruleId` + `file` + `locationKey`
+            when the agent sent a `ruleId`, else of `file` + `title` (the key every
+            finding had before `ruleId` existed). The key of the new/carried/resolved
+            diff, the counts, and triage: a verdict is attached to and addressed by it.
         triage:
           oneOf:
             - $ref: '#/components/schemas/Triage'
@@ -686,22 +845,25 @@ components:
       description: >-
         Human triage verdict on a finding, persisted across agent re-runs. acknowledged
         still counts toward a repo's status; false_positive and accepted_risk quiet it.
-      required: [status, note, createdAt, updatedAt]
+      required: [status, note, triagedBy, createdAt, updatedAt]
       properties:
         status:
           type: string
           enum: [acknowledged, false_positive, accepted_risk]
         note: { type: string, description: Free-text justification }
+        triagedBy:
+          type: string
+          description: Actor who triaged the finding (from x-hermes-user, or 'unknown')
         createdAt: { type: integer, description: First tagged (epoch-ms) }
         updatedAt: { type: integer, description: Last changed (epoch-ms) }
-
     ResolvedFinding:
       type: object
-      required: [severity, title, file]
+      required: [severity, title, file, fingerprint]
       properties:
         severity: { $ref: '#/components/schemas/Severity' }
         title: { type: string }
         file: { type: string }
+        fingerprint: { type: string, description: Issue identity (see Finding) }
 
     ReviewInput:
       type: object
@@ -716,25 +878,48 @@ components:
             Distinct from `engine` (the static-analysis tool stack). Part of the
             dedup identity, so two models scanning the same commit are kept as
             separate reviews. Shown per row on the repo's review history.
-        trigger: { type: string, default: Scheduled }
-        engine: { type: string, default: slither+semgrep+llm }
-        summary: { type: string, default: '' }
-        durationSecs: { type: integer, default: 0 }
+        trigger:
+          type: string
+          default: ''
+          description: What started the run, e.g. Scheduled. Stored as sent; omitted = '' (shown as —).
+        engine:
+          type: string
+          default: ''
+          description: >-
+            Static-analysis tool stack, e.g. slither+semgrep+llm. Part of the dedup
+            identity. Stored as sent (trimmed); omitted = '' (shown as —).
+        summary:
+          type: string
+          default: ''
+          description: >-
+            Executive summary. When empty, the report shows a line built from the
+            review's own data (issue counts, files, engine, model).
+        durationSecs: { type: integer, minimum: 0, default: 0 }
         lines:
           type: integer
+          minimum: 0
           description: Defaults to the repo's registered line count if omitted
-        filesScanned: { type: integer, default: 0 }
+        filesScanned: { type: integer, minimum: 0, default: 0 }
+        agentVersion:
+          type: string
+          maxLength: 200
+          description: >-
+            Version of the agent that produced the review (e.g. `hermes-agent 1.4.2`).
+            Returned on the review detail and shown on the report only when sent. Not
+            part of the dedup identity.
+            Trimmed; null or omitted = not sent.
         html:
           type: string
           description: Optional pre-rendered report body; sanitized server-side
         nextRunAt:
           type: [integer, string]
           description: >-
-            When the agent plans its next review run — epoch-ms or ISO-8601. Shown
-            as the dashboard "Next run". The schedule is agent-driven/flexible; there
-            is no fixed cadence. Persists until the agent reports a new value:
-            omitting it keeps the last reported next run; send 0 to clear it back to
-            "unscheduled".
+            When the agent plans its next review run — epoch-ms (an integer, or a
+            digits-only string of 12+ digits) or ISO-8601. 10-digit epoch seconds are
+            rejected with 400. Shown as the dashboard "Next run". The schedule is
+            agent-driven/flexible; there is no fixed cadence. Persists until the agent
+            reports a new value: omitting it keeps the last reported next run; send 0
+            to clear it back to "unscheduled".
         findings:
           type: array
           items: { $ref: '#/components/schemas/FindingInput' }
@@ -765,7 +950,7 @@ components:
     ScanState:
       type: object
       description: Singleton live active-run state.
-      required: [active, progress]
+      required: [active, progress, dataVersion]
       properties:
         active: { type: boolean }
         repoId: { type: [string, 'null'] }
@@ -774,28 +959,38 @@ components:
         progress: { type: number, description: 0–100 }
         engine: { type: [string, 'null'] }
         startedAt: { type: [integer, 'null'], description: Epoch-ms }
-
+        dataVersion: { type: integer, description: Monotonic counter bumped by DB writes }
     ScanUpdate:
       type: object
       required: [active]
       properties:
         active: { type: boolean, description: 'true during a scan, false when complete' }
-        repoId: { type: string }
-        commit: { type: string }
-        currentFile: { type: string }
-        progress: { type: number, description: 0–100; defaults to 0 }
-        engine: { type: string }
-        startedAt: { type: integer, description: Epoch-ms }
+        repoId:
+          type: [string, 'null']
+          description: Must be a registered repository while `active` is true (else 400)
+        commit: { type: [string, 'null'] }
+        currentFile: { type: [string, 'null'] }
+        progress:
+          type: integer
+          description: 0–100; out-of-range integers are clamped, non-integers are a 400. Defaults to 0.
+        engine: { type: [string, 'null'] }
+        startedAt: { type: integer, minimum: 0, description: Epoch-ms; defaults to now }
 
     TrendBucket:
       type: object
       required: [day, date, newFindings, resolvedFindings, reviews]
       properties:
-        day: { type: string, description: '`M/D` label, e.g. 6/15' }
-        date: { type: integer, description: 'Local midnight, epoch-ms' }
-        newFindings: { type: integer }
-        resolvedFindings: { type: integer }
-        reviews: { type: integer }
+        day: { type: string, description: '`M/D` label for the UTC day, e.g. 6/15' }
+        date: { type: integer, description: 'UTC midnight, epoch-ms' }
+        newFindings:
+          type: integer
+          description: Issues first discovered on reviews created during this UTC day.
+        resolvedFindings:
+          type: integer
+          description: Fixes recorded by new-commit reviews during this UTC day.
+        reviews:
+          type: integer
+          description: All reviews created during this UTC day, including same-commit scans.
 
     TrendsResponse:
       type: object
@@ -807,18 +1002,11 @@ components:
           type: array
           items: { $ref: '#/components/schemas/TrendBucket' }
 
-    TrendPoint:
-      type: object
-      required: [day, count]
-      properties:
-        day: { type: string }
-        count: { type: integer, description: New findings on the day }
-
     Overview:
       type: object
       required:
-        [totals, quietedTotal, flagged, clean, reposCount, reviewsAllTime, avgScanLabel,
-         orgLabel, lastRunLabel, nextRunAt, nextRunLabel, trend, repos]
+        [totals, quietedTotal, flagged, clean, reposCount, reviewsAllTime, avgScanSecs,
+         lastRunAt, nextRunAt, trend, repos]
       properties:
         totals: { $ref: '#/components/schemas/SeverityCounts' }
         quietedTotal:
@@ -828,16 +1016,19 @@ components:
         clean: { type: integer, description: Repos without findings }
         reposCount: { type: integer }
         reviewsAllTime: { type: integer }
-        avgScanLabel: { type: string }
-        orgLabel: { type: string }
-        lastRunLabel: { type: string }
+        avgScanSecs:
+          type: [integer, 'null']
+          description: Mean scan duration across all reviews in whole seconds, or null if there are none.
+        lastRunAt:
+          type: [integer, 'null']
+          description: Epoch-ms of the most recent review of any repo, or null if there are none.
         nextRunAt:
           type: [integer, 'null']
-          description: Epoch-ms of the agent's next planned run, or null if unscheduled
-        nextRunLabel: { type: string, description: 'e.g. "in 3h 46m", "due now", "unscheduled"' }
+          description: Epoch-ms of the agent's next planned run, or null if unscheduled.
         trend:
           type: array
-          items: { $ref: '#/components/schemas/TrendPoint' }
+          description: Same 14 UTC daily buckets as GET /api/trends?days=14.
+          items: { $ref: '#/components/schemas/TrendBucket' }
         repos:
           type: array
           items: { $ref: '#/components/schemas/RepoSummary' }

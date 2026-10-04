@@ -16,13 +16,25 @@ export type TriageStatus = 'acknowledged' | 'false_positive' | 'accepted_risk';
 
 export interface Triage {
 	status: TriageStatus;
-	/** Free-text justification — expected for false_positive / accepted_risk. */
+	/** Free-text justification — required for false_positive / accepted_risk on crit/high. */
 	note: string;
+	/** Actor who triaged this finding (from x-hermes-user header, or 'unknown'). */
+	triagedBy: string;
 	createdAt: number;
 	updatedAt: number;
 }
 
-/** A single security finding as rendered in a report. */
+/** One place an issue was reported in a review. */
+export interface FindingLocation {
+	file: string;
+	line: number;
+	/** Agent-reported enclosing function/symbol; '' when not sent. */
+	locationKey: string;
+}
+
+/** A security issue as rendered in a report: every finding sharing an identity
+ *  (`fingerprint`) in one review, with the top-level fields taken from its most severe
+ *  (then earliest-reported) location. */
 export interface Finding {
 	severity: Severity;
 	title: string;
@@ -32,13 +44,20 @@ export interface Finding {
 	description: string;
 	code: string;
 	recommendation: string;
+	/** Agent-reported detector/rule id (e.g. `reentrancy-eth`); '' when not sent. */
+	ruleId: string;
+	/** Agent-reported enclosing function/symbol (e.g. `Vault.withdraw`); '' when not sent. */
+	locationKey: string;
+	/** Every location of this issue in the review, ordered by file then line (≥ 1). */
+	locations: FindingLocation[];
 	/** Whether this finding is new relative to the previous review of the same repo. */
 	isNew: boolean;
 	/** How many consecutive runs this finding has been open. */
 	openRuns: number;
 	/** Age in hours since first detected. */
 	ageHours: number;
-	/** Stable per-repo finding identity (sha1 of file+title) — addresses triage writes. */
+	/** Stable per-repo issue identity: ruleId + file + locationKey when the agent sent a
+	 *  ruleId, else the legacy file + title hash. Addresses triage writes. */
 	fingerprint: string;
 	/** Human triage verdict, or null when untriaged ("open"). */
 	triage: Triage | null;
@@ -49,6 +68,8 @@ export interface ResolvedFinding {
 	severity: Severity;
 	title: string;
 	file: string;
+	/** Issue identity of the resolved finding (see Finding.fingerprint). */
+	fingerprint: string;
 }
 
 /** Lightweight review summary used in lists/tables. */
@@ -60,14 +81,15 @@ export interface ReviewSummary {
 	model: string;
 	prevCommit: string | null;
 	trigger: string;
+	/** Epoch-ms. */
 	createdAt: number;
-	dateLabel: string;
-	agoLabel: string;
-	durationLabel: string;
+	/** Scan duration in seconds. */
 	durationSecs: number;
 	counts: SeverityCounts;
 	clean: boolean;
+	/** Repository-first discoveries in this scan, including those found on a re-scan. */
 	newCount: number;
+	/** Stored first-scan resolution snapshot against the preceding commit's union. */
 	resolvedCount: number;
 	hasDelta: boolean;
 }
@@ -75,6 +97,8 @@ export interface ReviewSummary {
 /** Full review with findings, diff and optional sanitized HTML body. */
 export interface ReviewDetail extends ReviewSummary {
 	engine: string;
+	/** Version of the agent that produced the review; '' when unreported. */
+	agentVersion: string;
 	summary: string;
 	lines: number;
 	filesScanned: number;
@@ -96,7 +120,6 @@ export interface RepoSummary {
 	path: string;
 	branch: string;
 	lines: number;
-	langColor: string;
 	/** Status counts: the union of findings across all scans of the current commit,
 	 *  excluding findings quieted by triage (false-positive / accepted-risk). */
 	counts: SeverityCounts;
@@ -104,12 +127,15 @@ export interface RepoSummary {
 	 *  is `counts.total + quietedCount`. */
 	quietedCount: number;
 	status: 'flagged' | 'clean';
-	statusLabel: string;
 	clean: boolean;
-	glyph: string;
 	scanning: boolean;
-	lastRunLabel: string;
-	lastDurationLabel: string;
+	/** Earliest first-seen epoch-ms among open crit/high issues in the head-commit union;
+	 *  null when none remain after triage quieting. */
+	oldestOpenAt: number | null;
+	/** Epoch-ms of the current commit's latest scan, or null if never scanned. */
+	lastRunAt: number | null;
+	/** Duration in seconds of that scan, or null if never scanned. */
+	lastDurationSecs: number | null;
 	filesScanned: number;
 	/** The repo's current commit (most recently introduced), or null if never scanned. */
 	headCommit: string | null;
@@ -117,20 +143,43 @@ export interface RepoSummary {
 	headScanCount: number;
 }
 
-export interface RepoDetail extends RepoSummary {
-	reviews: ReviewSummary[];
+/** One scan within a commit's history group. Counts exclude quieted issues. */
+export interface CommitScan {
+	reviewId: string;
+	model: string;
+	/** Epoch-ms when this scan was created. */
+	createdAt: number;
+	counts: SeverityCounts;
+	/** Issues in this scan found by no other model on the same commit. */
+	uniqueCount: number;
 }
 
-export interface TrendPoint {
-	day: string;
-	count: number;
+/** A code state, unioned across scans and compared with the preceding code state. */
+export interface CommitGroup {
+	commit: string;
+	/** Epoch-ms of this commit's first scan; re-scans do not reorder history. */
+	createdAt: number;
+	/** Worst severity per issue across all scans, excluding quieted issues. */
+	counts: SeverityCounts;
+	/** Issues absent from the preceding commit's union; zero without a predecessor. */
+	newCount: number;
+	/** Issues in the preceding union but absent here; zero without a predecessor. */
+	fixedCount: number;
+	/** At least one scan, newest first. */
+	scans: CommitScan[];
+}
+
+export interface RepoDetail extends RepoSummary {
+	reviews: ReviewSummary[];
+	/** Commit groups, most recently introduced first; scans within each are newest first. */
+	commits: CommitGroup[];
 }
 
 /** A daily aggregate bucket exposed by GET /api/trends. */
 export interface TrendBucket {
-	/** "M/D" label for the day. */
+	/** "M/D" label for the UTC day. */
 	day: string;
-	/** Start-of-day timestamp (local), ms. */
+	/** UTC midnight, epoch-ms. */
 	date: number;
 	/** Findings first introduced on this day. */
 	newFindings: number;
@@ -149,13 +198,14 @@ export interface Overview {
 	clean: number;
 	reposCount: number;
 	reviewsAllTime: number;
-	avgScanLabel: string;
-	orgLabel: string;
-	lastRunLabel: string;
+	/** Mean scan duration across all reviews in whole seconds, or null if there are none. */
+	avgScanSecs: number | null;
+	/** Epoch-ms of the most recent review of any repo, or null if there are none. */
+	lastRunAt: number | null;
 	/** Agent-reported next planned run (epoch-ms), or null if unscheduled. */
 	nextRunAt: number | null;
-	nextRunLabel: string;
-	trend: TrendPoint[];
+	/** Daily UTC buckets for the current day and the preceding 13 days. */
+	trend: TrendBucket[];
 	repos: RepoSummary[];
 }
 
@@ -168,4 +218,5 @@ export interface ScanState {
 	progress: number;
 	engine: string | null;
 	startedAt: number | null;
+	dataVersion: number;
 }

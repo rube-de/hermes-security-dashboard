@@ -1,24 +1,35 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { TRIAGE_STATUSES, TRIAGE_LABEL } from '$lib/format';
-	import type { Triage, TriageStatus } from '$lib/types';
+	import type { Severity, Triage, TriageStatus } from '$lib/types';
 
 	let {
 		repoId,
 		fingerprint,
+		severity,
 		current,
 		onChanged
 	}: {
 		repoId: string;
 		fingerprint: string;
+		severity?: Severity;
 		current: Triage | null;
-		onChanged: (t: Triage | null) => void;
+		onChanged: (t: Triage | null, restoreFocus: boolean) => void;
 	} = $props();
 
 	let open = $state(false);
 	let busy = $state(false);
 	let err = $state('');
 	let note = $state('');
+	let triggerEl: HTMLButtonElement | undefined = $state();
+
+	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape' && open) {
+			e.preventDefault();
+			open = false;
+			triggerEl?.focus();
+		}
+	}
 
 	function toggle() {
 		if (!open) {
@@ -32,13 +43,22 @@
 	// the single source of truth for display — updates without a reload.
 	async function apply(status: TriageStatus | 'open') {
 		if (busy) return;
-		busy = true;
 		err = '';
+		const trimmedNote = note.trim();
+		const isCritOrHigh = severity === 'crit' || severity === 'high';
+		const isDismissal = status === 'false_positive' || status === 'accepted_risk';
+		if (isCritOrHigh && isDismissal && !trimmedNote) {
+			err = 'A note is required for false positive or accepted risk on critical/high findings';
+			return;
+		}
+
+		const restoreFocus = triggerEl?.parentElement?.contains(document.activeElement) ?? false;
+		busy = true;
 		try {
 			const res = await fetch(`${base}/api/repos/${repoId}/findings/${fingerprint}/triage`, {
 				method: 'PUT',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ status, note: note.trim() })
+				body: JSON.stringify({ status, note: trimmedNote })
 			});
 			if (!res.ok) {
 				const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -46,15 +66,17 @@
 				return;
 			}
 			if (status === 'open') {
-				onChanged(null);
+				onChanged(null, restoreFocus);
 			} else {
+				const body = (await res.json().catch(() => ({}))) as { triagedBy?: string };
 				const now = Date.now();
 				onChanged({
 					status,
-					note: note.trim(),
+					note: trimmedNote,
+					triagedBy: body.triagedBy || current?.triagedBy || 'unknown',
 					createdAt: current?.createdAt ?? now,
 					updatedAt: now
-				});
+				}, restoreFocus);
 			}
 			open = false;
 		} catch {
@@ -65,17 +87,30 @@
 	}
 </script>
 
+<svelte:window onkeydown={handleKeydown} />
+
 <div class="triage">
-	<button class="trigger mono" class:active={open} onclick={toggle}>
-		{current ? 'Edit triage' : 'Triage'} ▾
+	<button
+		bind:this={triggerEl}
+		class="trigger mono"
+		class:active={open}
+		aria-expanded={open}
+		aria-haspopup="true"
+		aria-controls="triage-panel-{fingerprint}"
+		onclick={toggle}
+	>
+		{current ? 'Edit triage' : 'Triage'} <span aria-hidden="true">▾</span>
 	</button>
 
 	{#if open}
-		<div class="panel">
+		<div class="panel" id="triage-panel-{fingerprint}">
+			<label for="triage-note-{fingerprint}" class="visually-hidden">Triage justification note</label>
 			<textarea
+				id="triage-note-{fingerprint}"
 				class="note"
 				bind:value={note}
 				rows="2"
+				aria-label="Triage justification note"
 				placeholder="Justification (recommended for dismissals)"
 			></textarea>
 			<div class="actions">
@@ -83,6 +118,7 @@
 					<button
 						class="set {s}"
 						class:active={current?.status === s}
+						aria-pressed={current?.status === s}
 						disabled={busy}
 						onclick={() => apply(s)}
 					>
@@ -93,7 +129,7 @@
 					<button class="clear" disabled={busy} onclick={() => apply('open')}>Clear</button>
 				{/if}
 			</div>
-			{#if err}<div class="err mono">{err}</div>{/if}
+			{#if err}<div class="err mono" role="alert">{err}</div>{/if}
 		</div>
 	{/if}
 </div>
@@ -144,7 +180,8 @@
 		font-family: inherit;
 	}
 	.note:focus {
-		outline: none;
+		outline: 2px solid var(--accent);
+		outline-offset: 1px;
 		border-color: var(--accent);
 	}
 	.actions {

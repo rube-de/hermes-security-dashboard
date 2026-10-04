@@ -1,4 +1,5 @@
 import { renameSync, rmSync } from 'node:fs';
+import { backup } from 'node:sqlite';
 import { db, SNAPSHOT_PATH } from './db';
 
 /**
@@ -21,18 +22,33 @@ let signalled = false;
 let finalized = false;
 let timer: ReturnType<typeof setInterval> | null = null;
 
+/** Tail of the snapshot queue; snapshots run one at a time. */
+let lastSnapshot: Promise<void> = Promise.resolve();
+
 /**
- * Write a consistent point-in-time copy for the sync layer. `VACUUM INTO` errors
- * if the target already exists, so we vacuum into a temp file and atomically
- * rename it over the snapshot — the sidecar therefore only ever sees a complete
- * database, never a half-written one.
+ * Write a consistent point-in-time copy for the sync layer: an online `backup()` into
+ * a temp file, then an atomic rename over the snapshot, so the sidecar only ever sees
+ * a complete database. Calls are serialized rather than deduplicated: a snapshot
+ * requested while one is running (e.g. the final one after the request drain) starts
+ * after it, so it still captures writes that landed in between.
  */
-export function snapshot(): void {
-	if (!SNAPSHOT_PATH) return;
+export function snapshot(): Promise<void> {
+	if (!SNAPSHOT_PATH) return Promise.resolve();
 	const tmp = `${SNAPSHOT_PATH}.tmp`;
-	rmSync(tmp, { force: true });
-	db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
-	renameSync(tmp, SNAPSHOT_PATH);
+	const run = lastSnapshot
+		.catch(() => {})
+		.then(async () => {
+			rmSync(tmp, { force: true });
+			try {
+				await backup(db, tmp);
+				renameSync(tmp, SNAPSHOT_PATH);
+			} catch (err) {
+				rmSync(tmp, { force: true });
+				throw err;
+			}
+		});
+	lastSnapshot = run;
+	return run;
 }
 
 /** Fold the WAL back into the main DB so `-wal` doesn't grow without bound. */
@@ -40,10 +56,10 @@ function checkpoint(): void {
 	db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
 }
 
-function tick(): void {
+async function tick(): Promise<void> {
 	try {
 		checkpoint();
-		snapshot();
+		await snapshot();
 	} catch (err) {
 		console.error('[hermes] snapshot tick failed', err);
 	}
@@ -54,13 +70,13 @@ function tick(): void {
  * grace period is cut short) and stop the interval — but do NOT exit. We let
  * adapter-node drain in-flight requests; the close+exit happens in `finalize`.
  */
-function onSignal(reason: string): void {
+async function onSignal(reason: string): Promise<void> {
 	if (signalled) return;
 	signalled = true;
 	if (timer) clearInterval(timer);
 	console.log(`[hermes] ${reason} — snapshotting, awaiting request drain`);
 	try {
-		snapshot();
+		await snapshot();
 	} catch (err) {
 		console.error('[hermes] snapshot on signal failed', err);
 	}
@@ -71,11 +87,11 @@ function onSignal(reason: string): void {
  * server has closed all connections. Captures any writes that landed during the
  * drain, closes the DB, and exits cleanly.
  */
-function finalize(): void {
+async function finalize(): Promise<void> {
 	if (finalized) return;
 	finalized = true;
 	try {
-		snapshot();
+		await snapshot();
 	} catch (err) {
 		console.error('[hermes] final snapshot failed', err);
 	}

@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { getReviewDetail } from '$lib/server/store';
+import { getReviewDetail } from '$lib/server/reviews';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = ({ params }) => {

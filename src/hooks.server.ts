@@ -7,7 +7,7 @@ import { startDurability } from '$lib/server/durability';
  *  production it also warns about open writes and starts the snapshot loop. */
 export function init() {
 	if (building) return;
-	seedIfEmpty();
+	seedIfEmpty(dev);
 
 	// dev is intentionally open and ephemeral — keep its startup quiet and don't
 	// install snapshot/shutdown machinery there.

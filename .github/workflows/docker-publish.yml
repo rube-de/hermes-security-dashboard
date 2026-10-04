@@ -1,6 +1,8 @@
-name: publish-image
+name: ci
 
-# Builds and pushes the container image to GitHub Container Registry (GHCR).
+# `verify` (check → test → build) runs on every pull request and push.
+# `publish` builds and pushes the container image to GitHub Container Registry
+# (GHCR), only after `verify` passes and only for main and version tags.
 # Two variants are published because the base path is baked at build time:
 #   root      -> ghcr.io/<owner>/<repo>:latest          (and :main, :sha-…, :X.Y[.Z])
 #   /security -> ghcr.io/<owner>/<repo>:latest-security  (…and -security on every tag)
@@ -10,6 +12,7 @@ name: publish-image
 # anonymous pulls.
 
 on:
+  pull_request:
   push:
     branches: [main]
     tags: ['v*']
@@ -20,7 +23,38 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Node runs check/test/build (node:sqlite); matches the runtime image.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Type check
+        run: bun run check
+
+      - name: Test
+        run: bun run test
+
+      - name: Build
+        run: bun run build
+
   publish:
+    needs: verify
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read

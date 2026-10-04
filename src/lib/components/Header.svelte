@@ -5,12 +5,9 @@
 	import { scan } from '$lib/scan.svelte';
 	import Logo from './Logo.svelte';
 
-	// Strip the base prefix so the route regexes below match regardless of the
-	// deploy path (page.url.pathname includes base, e.g. /security/repo/x).
-	const path = $derived(page.url.pathname.slice(base.length));
 	const repoId = $derived(page.params.id ?? null);
-	const isReview = $derived(/^\/repo\/[^/]+\/review\//.test(path));
-	const isRepo = $derived(/^\/repo\/[^/]+\/?$/.test(path));
+	const isReview = $derived(page.route.id === '/repo/[id]/review/[rid]');
+	const isRepo = $derived(page.route.id === '/repo/[id]');
 	const commit = $derived((page.data as { review?: { commit?: string } })?.review?.commit ?? null);
 </script>
 
@@ -41,23 +38,33 @@
 	<div class="spacer"></div>
 
 	{#if scan.state.active}
-		<a class="scan-pill mono" href={scan.state.repoId ? `${base}/repo/${scan.state.repoId}` : `${base}/`}>
-			<span class="scan-dot"></span>
-			<span>SCAN ACTIVE · {scan.elapsedLabel}</span>
-		</a>
+		<div class="scan-pill-wrap" role="status">
+			<a
+				class="scan-pill mono"
+				aria-label="Scan active, elapsed {scan.elapsedLabel}"
+				href={scan.state.repoId ? `${base}/repo/${scan.state.repoId}` : `${base}/`}
+			>
+				<span class="scan-dot" aria-hidden="true"></span>
+				<span class="scan-full" aria-hidden="true">SCAN ACTIVE · {scan.elapsedLabel}</span>
+				<span class="scan-compact" aria-hidden="true">{scan.elapsedLabel}</span>
+				<span class="visually-hidden">Scan active, elapsed {scan.elapsedLabel}</span>
+			</a>
+		</div>
 	{/if}
 
-	<div class="theme-toggle">
+	<div class="theme-toggle" role="group" aria-label="Theme selection">
 		<button
 			class="tbtn"
 			class:on={theme.current === 'dark'}
 			aria-label="Dark theme"
+			aria-pressed={theme.current === 'dark'}
 			onclick={() => theme.set('dark')}>☾</button
 		>
 		<button
 			class="tbtn"
 			class:on={theme.current === 'light'}
 			aria-label="Light theme"
+			aria-pressed={theme.current === 'light'}
 			onclick={() => theme.set('light')}>☀</button
 		>
 	</div>
@@ -119,8 +126,13 @@
 	.spacer {
 		flex: 1;
 	}
-	.scan-pill {
+	.scan-pill-wrap {
 		display: flex;
+		align-items: center;
+		flex-shrink: 0;
+	}
+	.scan-pill {
+		display: inline-flex;
 		align-items: center;
 		gap: 7px;
 		padding: 5px 11px;
@@ -130,6 +142,8 @@
 		color: var(--accent);
 		font-size: 11px;
 		font-weight: 600;
+		white-space: nowrap;
+		flex-shrink: 0;
 	}
 	.scan-dot {
 		width: 7px;
@@ -137,6 +151,13 @@
 		border-radius: 50%;
 		background: var(--accent);
 		animation: hpulse 1.6s infinite;
+		flex-shrink: 0;
+	}
+	.scan-full {
+		display: inline;
+	}
+	.scan-compact {
+		display: none;
 	}
 	.theme-toggle {
 		display: flex;
@@ -171,8 +192,20 @@
 			display: none;
 		}
 		header {
-			gap: 12px;
-			padding: 12px 16px;
+			gap: 10px;
+			padding: 10px 14px;
+		}
+	}
+	@media (max-width: 480px) {
+		.scan-pill {
+			gap: 5px;
+			padding: 4px 8px;
+		}
+		.scan-full {
+			display: none;
+		}
+		.scan-compact {
+			display: inline;
 		}
 	}
 </style>

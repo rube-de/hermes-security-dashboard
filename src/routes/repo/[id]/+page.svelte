@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { scan } from '$lib/scan.svelte';
-	import SeverityPills from '$lib/components/SeverityPills.svelte';
+	import { fmtDur, langColor } from '$lib/format';
+	import CommitHistory from '$lib/components/CommitHistory.svelte';
+	import Time from '$lib/components/Time.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -19,20 +21,7 @@
 			: '0:00'
 	);
 
-	// ----- re-run request -----
-	// The agent runs scans on a schedule; this records a user request for the next
-	// cycle (the agent reads pending requests via GET /api/repos/:id/rerun).
-	let rerun = $state<'idle' | 'pending' | 'queued' | 'error'>('idle');
-	async function requestRerun() {
-		if (rerun === 'pending' || rerun === 'queued') return;
-		rerun = 'pending';
-		try {
-			const res = await fetch(`${base}/api/repos/${repo.id}/rerun`, { method: 'POST' });
-			rerun = res.ok ? 'queued' : 'error';
-		} catch {
-			rerun = 'error';
-		}
-	}
+
 </script>
 
 <svelte:head><title>Hermes · {repo.id}</title></svelte:head>
@@ -42,7 +31,7 @@
 
 	<div class="head">
 		<div class="head-left">
-			<div class="repo-icon"><span class="lang-dot" style="background:{repo.langColor}"></span></div>
+			<div class="repo-icon"><span class="lang-dot" style="background:{langColor(repo.lang)}"></span></div>
 			<div>
 				<h1 class="display">{repo.id}</h1>
 				<div class="meta mono">
@@ -52,27 +41,11 @@
 				<div class="desc">{repo.description}</div>
 			</div>
 		</div>
-		<button
-			class="rerun mono"
-			onclick={requestRerun}
-			disabled={rerun === 'pending' || rerun === 'queued'}
-			aria-live="polite"
-			title="Request a re-run on the next Hermes cycle"
-		>
-			{#if rerun === 'queued'}
-				<span>✓</span> Re-run requested
-			{:else if rerun === 'pending'}
-				<span>↻</span> Requesting…
-			{:else if rerun === 'error'}
-				<span>⚠</span> Try again
-			{:else}
-				<span>↻</span> Re-run review
-			{/if}
-		</button>
+
 	</div>
 
 	{#if scanning}
-		<div class="scan-banner">
+		<div class="scan-banner" role="status">
 			<span class="scan-dot"></span>
 			<div class="scan-text mono">
 				Review in progress — <span class="dim">scanning {live.currentFile ?? '…'}</span>
@@ -100,19 +73,13 @@
 			<div class="tile-num display">{repo.counts.low}</div>
 		</div>
 		<div class="card meta-card">
-			<div><div class="ml">Last scan</div><div class="mv mono">{repo.lastRunLabel}</div></div>
-			<div><div class="ml">Duration</div><div class="mv mono">{repo.lastDurationLabel}</div></div>
+			<div><div class="ml">Last scan</div><div class="mv mono">{#if repo.lastRunAt !== null}<Time ts={repo.lastRunAt} mode="ago" />{:else}never{/if}</div></div>
+			<div><div class="ml">Duration</div><div class="mv mono">{repo.lastDurationSecs !== null ? fmtDur(repo.lastDurationSecs) : '—'}</div></div>
 			<div><div class="ml">Lines</div><div class="mv mono">{repo.lines.toLocaleString('en-US')}</div></div>
 			<div><div class="ml">Files</div><div class="mv mono">{repo.filesScanned}</div></div>
 		</div>
 	</div>
 
-	{#if repo.headScanCount > 1}
-		<p class="union-note mono">
-			Status above unions {repo.headScanCount} scans of <span class="commit">{repo.headCommit}</span> —
-			a finding any scan flags is counted, so the headline can exceed an individual run below.
-		</p>
-	{/if}
 
 	{#if repo.quietedCount > 0}
 		<p class="union-note mono">
@@ -121,49 +88,13 @@
 		</p>
 	{/if}
 
-	<section class="history">
-		<div class="hist-head">
-			<h2 class="display">Review history</h2>
-			<span class="mono faint">click a run to open the report</span>
-		</div>
-		<div class="table card">
-			<div class="thead mono">
-				<div>Date</div>
-				<div>Commit</div>
-				<div>Model</div>
-				<div>Trigger</div>
-				<div>Findings</div>
-				<div>Duration</div>
-				<div></div>
-			</div>
-			{#each repo.reviews as rv (rv.id)}
-				<a class="rrow" href="{base}/repo/{repo.id}/review/{rv.id}">
-					<div class="mono rdate">{rv.dateLabel}</div>
-					<div class="mono rcommit">{rv.commit}</div>
-					<div class="mono rmodel">{rv.model || '—'}</div>
-					<div class="rtrigger">{rv.trigger}</div>
-					<div class="rfind">
-						<SeverityPills counts={rv.counts} cleanLabel="✓ clean" />
-						{#if rv.hasDelta}
-							<span class="delta mono">
-								<span class="up">+{rv.newCount}</span>
-								<span class="down">−{rv.resolvedCount}</span>
-							</span>
-						{/if}
-					</div>
-					<div class="mono rdur">{rv.durationLabel}</div>
-					<div class="rchev">›</div>
-				</a>
-			{/each}
-		</div>
-	</section>
+	<CommitHistory repoId={repo.id} commits={repo.commits} />
 </main>
 
 <style>
 	main {
-		max-width: 1180px;
-		margin: 0 auto;
-		padding: 26px;
+		padding-top: 26px;
+		padding-bottom: 26px;
 	}
 	.back {
 		display: inline-flex;
@@ -227,24 +158,7 @@
 		color: var(--dim);
 		margin-top: 8px;
 	}
-	.rerun {
-		display: inline-flex;
-		align-items: center;
-		gap: 7px;
-		padding: 9px 16px;
-		border-radius: 10px;
-		background: var(--accentB);
-		border: 1px solid var(--accent);
-		color: var(--accent);
-		font-size: 13px;
-		font-weight: 600;
-		cursor: pointer;
-		white-space: nowrap;
-	}
-	.rerun:disabled {
-		cursor: default;
-		opacity: 0.7;
-	}
+
 
 	.scan-banner {
 		display: flex;
@@ -335,104 +249,6 @@
 		color: var(--dim);
 		line-height: 1.5;
 	}
-	.union-note .commit {
-		color: var(--accent2);
-	}
-	.history {
-		margin-top: 26px;
-	}
-	.hist-head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		margin-bottom: 14px;
-	}
-	.hist-head h2 {
-		margin: 0;
-		font-weight: 600;
-		font-size: 18px;
-		color: var(--text);
-	}
-	.faint {
-		color: var(--faint);
-		font-size: 12px;
-	}
-	.table {
-		border-radius: 16px;
-		overflow: hidden;
-	}
-	.thead,
-	.rrow {
-		display: grid;
-		grid-template-columns: 1.2fr 0.9fr 0.95fr 0.85fr 1.5fr 0.75fr 32px;
-		gap: 14px;
-		align-items: center;
-	}
-	.thead {
-		padding: 12px 20px;
-		border-bottom: 1px solid var(--border);
-		font-size: 10px;
-		letter-spacing: 0.1em;
-		text-transform: uppercase;
-		color: var(--faint);
-	}
-	.rrow {
-		padding: 15px 20px;
-		border-bottom: 1px solid var(--border);
-		cursor: pointer;
-		transition: background 0.12s;
-	}
-	.rrow:last-child {
-		border-bottom: none;
-	}
-	.rrow:hover {
-		background: var(--hover);
-	}
-	.rdate {
-		font-size: 13px;
-		color: var(--text);
-	}
-	.rcommit {
-		font-size: 13px;
-		color: var(--accent2);
-	}
-	.rmodel {
-		font-size: 12px;
-		color: var(--dim);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	.rtrigger {
-		font-size: 12px;
-		color: var(--dim);
-	}
-	.rfind {
-		display: flex;
-		gap: 8px;
-		flex-wrap: wrap;
-		align-items: center;
-	}
-	.delta {
-		font-size: 11px;
-		color: var(--faint);
-		white-space: nowrap;
-	}
-	.delta .up {
-		color: var(--high);
-	}
-	.delta .down {
-		color: var(--accent);
-	}
-	.rdur {
-		font-size: 13px;
-		color: var(--dim);
-	}
-	.rchev {
-		color: var(--faint);
-		text-align: right;
-		font-size: 16px;
-	}
 
 	@media (max-width: 820px) {
 		.summary {
@@ -445,35 +261,6 @@
 	@media (max-width: 700px) {
 		.head {
 			flex-direction: column;
-		}
-		.thead {
-			display: none;
-		}
-		.rrow {
-			grid-template-columns: 1fr auto;
-			grid-template-areas: 'date chev' 'commit commit' 'model model' 'find find' 'dur dur';
-			gap: 6px;
-		}
-		.rdate {
-			grid-area: date;
-		}
-		.rcommit {
-			grid-area: commit;
-		}
-		.rmodel {
-			grid-area: model;
-		}
-		.rtrigger {
-			display: none;
-		}
-		.rfind {
-			grid-area: find;
-		}
-		.rdur {
-			grid-area: dur;
-		}
-		.rchev {
-			grid-area: chev;
 		}
 	}
 </style>

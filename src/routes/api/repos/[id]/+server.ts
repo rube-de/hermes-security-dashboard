@@ -1,7 +1,8 @@
 import { json } from '@sveltejs/kit';
-import { getRepoDetail } from '$lib/server/store';
+import { getRepoDetail } from '$lib/server/repos';
 import type { RequestHandler } from './$types';
 
+/** Current status plus commit-grouped, union-based transitions and flat scan summaries. */
 export const GET: RequestHandler = ({ params }) => {
 	const repo = getRepoDetail(params.id);
 	if (!repo) return json({ error: 'repository not found' }, { status: 404 });
