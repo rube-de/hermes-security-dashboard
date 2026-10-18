@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { SEV_LABEL, SEV_VAR, SEV_BG_VAR, TRIAGE_LABEL, quiets } from '$lib/format';
+	import { issuePrompt } from '$lib/issue-prompt';
 	import type { Finding, Triage } from '$lib/types';
 	import FindingTriage from './FindingTriage.svelte';
 	import Time from './Time.svelte';
@@ -48,6 +49,17 @@
 			copyStatus = 'Could not copy. Copy the finding link instead.';
 		}
 	}
+
+	async function copyPrompt() {
+		copyStatus = '';
+		copyFailed = false;
+		try {
+			await navigator.clipboard.writeText(issuePrompt(finding, repoUrl, commit));
+			copyStatus = 'Prompt copied';
+		} catch {
+			copyStatus = 'Could not copy the prompt.';
+		}
+	}
 </script>
 
 <article
@@ -62,12 +74,20 @@
 		<span class="fpill mono" aria-label={SEV_LABEL[finding.severity]}>{SEV_LABEL[finding.severity]}</span>
 		<span class="life mono" class:new={finding.isNew}>{lifeText}</span>
 		{#if triage}<span class="tflag mono {triage.status}">{TRIAGE_LABEL[triage.status]}</span>{/if}
-		<button
-			type="button"
-			class="copy-link mono"
-			aria-label="Copy link to {finding.title}"
-			onclick={copyLink}>Copy link</button
-		>
+		<span class="copy-actions">
+			<button
+				type="button"
+				class="copy mono"
+				aria-label="Copy coding-agent prompt for {finding.title}"
+				onclick={copyPrompt}>Copy prompt</button
+			>
+			<button
+				type="button"
+				class="copy mono"
+				aria-label="Copy link to {finding.title}"
+				onclick={copyLink}>Copy link</button
+			>
+		</span>
 	</div>
 
 	<details bind:open={expanded}>
@@ -190,8 +210,12 @@
 		background: var(--medB);
 		color: var(--med);
 	}
-	.copy-link {
+	.copy-actions {
+		display: flex;
+		gap: 8px;
 		margin-left: auto;
+	}
+	.copy {
 		border: 1px solid var(--border2);
 		border-radius: 6px;
 		padding: 5px 8px;
@@ -200,7 +224,7 @@
 		background: var(--surface);
 		cursor: pointer;
 	}
-	.copy-link:hover {
+	.copy:hover {
 		color: var(--accent);
 		border-color: var(--accent);
 	}
@@ -332,7 +356,7 @@
 		.finding {
 			padding: 14px;
 		}
-		.copy-link {
+		.copy-actions {
 			margin-left: 0;
 		}
 		h3 {
