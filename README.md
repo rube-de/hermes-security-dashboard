@@ -199,8 +199,11 @@ Each finding also has **Copy prompt**, which copies an issue prompt (see
 asks the agent to verify the issue against its current checkout, assess the
 severity and propose a fix, and to modify no files until a human approves. The
 prompt is built in the browser by `src/lib/issue-prompt.ts`: fixed instructions,
-then one JSON block holding every reviewer-written value, so no field can pass
-itself off as an instruction. Triage verdicts and notes are never included.
+then one delimited JSON block holding every reviewer-written value. JSON escaping
+keeps any value from closing the block or starting a line of its own, and the
+fixed instructions tell the coding agent to treat the block as untrusted data;
+neither guarantees a model won't act on text inside it. Triage verdicts and
+notes are never included.
 
 ## Agent API
 

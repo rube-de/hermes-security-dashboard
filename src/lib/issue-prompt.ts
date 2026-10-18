@@ -35,8 +35,9 @@ function compact<T extends Record<string, string | number>>(fields: T): Partial<
 
 /** The issue prompt a human copies into a coding agent: fixed instructions, then one
  *  JSON data block holding every dynamic value. JSON escapes newlines, so no value can
- *  start a line and therefore none can close the fence or reach instruction position.
- *  Triage is deliberately excluded. */
+ *  start a line, close the fence, or sit outside the block; the instructions tell the
+ *  agent to treat the block as untrusted. That is a delimiter, not a guarantee the model
+ *  ignores text inside it. Triage is deliberately excluded. */
 export function issuePrompt(finding: Finding, repoUrl: string, commit: string): string {
 	const data = {
 		...compact({
