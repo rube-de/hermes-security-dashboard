@@ -198,6 +198,9 @@ Each finding also has **Copy prompt**, which copies an issue prompt (see
 [`GLOSSARY.md`](GLOSSARY.md)) for a coding agent such as Claude Code or Codex. It
 asks the agent to verify the issue against its current checkout, assess the
 severity and propose a fix, and to modify no files until a human approves. The
+chevron next to it shows the same text in a read-only panel; if the clipboard is
+unavailable (plain HTTP, denied permission), that panel opens with the prompt
+selected for a manual copy. The
 prompt is built in the browser by `src/lib/issue-prompt.ts`: fixed instructions,
 then one delimited JSON block holding every reviewer-written value. JSON escaping
 keeps any value from closing the block or starting a line of its own, and the

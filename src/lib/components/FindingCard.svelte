@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { SEV_LABEL, SEV_VAR, SEV_BG_VAR, TRIAGE_LABEL, quiets } from '$lib/format';
 	import { issuePrompt } from '$lib/issue-prompt';
 	import type { Finding, Triage } from '$lib/types';
@@ -50,14 +50,24 @@
 		}
 	}
 
+	// Derived values are lazy: built only when copied or previewed.
+	const prompt = $derived(issuePrompt(finding, repoUrl, commit));
+	let promptOpen = $state(false);
+	let promptEl = $state<HTMLTextAreaElement>();
+
 	async function copyPrompt() {
 		copyStatus = '';
 		copyFailed = false;
 		try {
-			await navigator.clipboard.writeText(issuePrompt(finding, repoUrl, commit));
+			await navigator.clipboard.writeText(prompt);
 			copyStatus = 'Prompt copied';
 		} catch {
-			copyStatus = 'Could not copy the prompt.';
+			// No clipboard (plain HTTP, denied permission): show the prompt selected for manual copy.
+			promptOpen = true;
+			await tick();
+			promptEl?.focus();
+			promptEl?.select();
+			copyStatus = 'Could not copy. The prompt is shown and selected: press Ctrl+C (⌘C on Mac).';
 		}
 	}
 </script>
@@ -75,12 +85,23 @@
 		<span class="life mono" class:new={finding.isNew}>{lifeText}</span>
 		{#if triage}<span class="tflag mono {triage.status}">{TRIAGE_LABEL[triage.status]}</span>{/if}
 		<span class="copy-actions">
-			<button
-				type="button"
-				class="copy mono"
-				aria-label="Copy coding-agent prompt for {finding.title}"
-				onclick={copyPrompt}>Copy prompt</button
-			>
+			<span class="split">
+				<button
+					type="button"
+					class="copy mono"
+					aria-label="Copy coding-agent prompt for {finding.title}"
+					onclick={copyPrompt}>Copy prompt</button
+				>
+				<button
+					type="button"
+					class="copy toggle mono"
+					aria-label="Show prompt for {finding.title}"
+					aria-expanded={promptOpen}
+					aria-controls="prompt-{finding.fingerprint}"
+					onclick={() => (promptOpen = !promptOpen)}
+					><span class="toggle-icon" class:open={promptOpen} aria-hidden="true">⌄</span></button
+				>
+			</span>
 			<button
 				type="button"
 				class="copy mono"
@@ -89,6 +110,21 @@
 			>
 		</span>
 	</div>
+
+	{#if promptOpen}
+		<div class="prompt" id="prompt-{finding.fingerprint}">
+			<label class="prompt-label mono" for="prompt-text-{finding.fingerprint}">Issue prompt</label>
+			<textarea
+				class="mono"
+				id="prompt-text-{finding.fingerprint}"
+				readonly
+				rows="12"
+				spellcheck="false"
+				bind:this={promptEl}
+				value={prompt}
+			></textarea>
+		</div>
+	{/if}
 
 	<details bind:open={expanded}>
 		<summary>
@@ -227,6 +263,53 @@
 	.copy:hover {
 		color: var(--accent);
 		border-color: var(--accent);
+	}
+	.split {
+		display: flex;
+	}
+	.split .copy:first-child {
+		border-top-right-radius: 0;
+		border-bottom-right-radius: 0;
+	}
+	.split .toggle {
+		margin-left: -1px;
+		border-top-left-radius: 0;
+		border-bottom-left-radius: 0;
+		padding: 5px 6px;
+	}
+	.toggle[aria-expanded='true'] {
+		color: var(--accent);
+		border-color: var(--accent);
+	}
+	.toggle-icon {
+		display: inline-block;
+		line-height: 1;
+		transition: transform 0.15s;
+	}
+	.toggle-icon.open {
+		transform: rotate(180deg);
+	}
+	.prompt {
+		margin-bottom: 12px;
+	}
+	.prompt-label {
+		display: block;
+		margin-bottom: 6px;
+		font-size: 10px;
+		text-transform: uppercase;
+		color: var(--faint);
+	}
+	.prompt textarea {
+		box-sizing: border-box;
+		width: 100%;
+		resize: vertical;
+		padding: 10px 12px;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: var(--surface2);
+		color: var(--text);
+		font-size: 11.5px;
+		line-height: 1.55;
 	}
 	summary {
 		cursor: pointer;
