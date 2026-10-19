@@ -194,6 +194,20 @@ reveals the finding, clearing a conflicting severity filter and enabling
 reviewed commit; repository/commit links and numeric CWE links open GitHub or
 MITRE in a new tab.
 
+Each finding also has **Copy prompt**, which copies an issue prompt (see
+[`GLOSSARY.md`](GLOSSARY.md)) for a coding agent such as Claude Code or Codex. It
+asks the agent to verify the issue against its current checkout, assess the
+severity and propose a fix, and to modify no files until a human approves. The
+chevron next to it shows the same text in a read-only panel; if the clipboard is
+unavailable (plain HTTP, denied permission), that panel opens with the prompt
+selected for a manual copy. The
+prompt is built in the browser by `src/lib/issue-prompt.ts`: fixed instructions,
+then one delimited JSON block holding every reviewer-written value. JSON escaping
+keeps any value from closing the block or starting a line of its own, and the
+fixed instructions tell the coding agent to treat the block as untrusted data;
+neither guarantees a model won't act on text inside it. Triage verdicts and
+notes are never included.
+
 ## Agent API
 
 A machine-readable **OpenAPI 3.1** spec lives at
@@ -482,7 +496,9 @@ run), `meta` (`data_version`, next run, org label, etc.). SQLite triggers increm
 `meta.data_version` on every write (repo, review, triage, or scan state transition).
 Each finding row is one location of an issue; rows of the same issue share a stable
 `fingerprint` (its [identity](#finding-identity)) so the issue is tracked run-over-run —
-that's what powers the new/carried/resolved diff and per-finding age ("open N runs"). Server data
+that's what powers the new/carried/resolved diff and per-finding age ("open N runs"). The
+API/TypeScript `Finding` type is the issue-level view: findings grouped by `fingerprint`,
+with each location in `locations` (see [`GLOSSARY.md`](GLOSSARY.md) for issue vs finding). Server data
 access lives in `src/lib/server/`: `db.ts` (connection) and `migrations.ts` (versioned
 schema), one module per domain (`repos.ts`, `commits.ts`, `reviews.ts`, `ingest.ts`,
 `triage.ts`, `overview.ts`, `trends.ts`, `scan.ts`, `meta.ts`), plus `seed.ts`,
