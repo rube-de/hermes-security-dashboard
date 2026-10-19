@@ -95,7 +95,7 @@
 				<button
 					type="button"
 					class="copy toggle mono"
-					aria-label="Show prompt for {finding.title}"
+					aria-label="Prompt preview for {finding.title}"
 					aria-expanded={promptOpen}
 					aria-controls="prompt-{finding.fingerprint}"
 					onclick={() => (promptOpen = !promptOpen)}
