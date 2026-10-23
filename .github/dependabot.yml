@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Base images in Dockerfile are pinned by digest, so a moved tag (e.g. a Node
+  # security release on node:26-bookworm-slim) becomes a PR instead of waiting
+  # for the next unrelated push to main.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: daily
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      base-images:
+        patterns: ["*"]
+    ignore:
+      # Runtime major (node 26 → 27, bun 1 → 2) is a deliberate upgrade, not a patch.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
