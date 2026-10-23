@@ -1,12 +1,16 @@
 # syntax=docker/dockerfile:1
 
+# Base images are pinned by digest; Dependabot (.github/dependabot.yml) opens a
+# PR whenever a tag moves, e.g. for a Node security release.
+FROM oven/bun:1@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS bun
+
 # ---- builder: install all deps and build the adapter-node server ----
 # Node base (not the bun image) so the build runs under Node: db.ts imports the
 # built-in node:sqlite, which Bun's runtime has no equivalent for and would fail
 # to resolve during `vite build`. Bun is still used as the fast package manager.
-FROM node:26-bookworm-slim AS builder
+FROM node:26-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS builder
 WORKDIR /app
-COPY --from=oven/bun:1 /usr/local/bin/bun /usr/local/bin/bun
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 
 # Base path is baked at build time (SvelteKit paths.base). Empty → root deploy.
 # Pass with: docker build --build-arg BASE_PATH=/security .
@@ -22,7 +26,7 @@ RUN bun run build
 
 # ---- prod-deps: production-only node_modules (adapter-node externalizes
 #      `dependencies`; everything in devDependencies is bundled into build/) ----
-FROM oven/bun:1 AS prod-deps
+FROM bun AS prod-deps
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --production --frozen-lockfile
@@ -30,7 +34,7 @@ RUN bun install --production --frozen-lockfile
 # ---- runtime: Node with built-in node:sqlite, non-root, on the shared volume ----
 # node:sqlite is stable and unflagged on Node 24+; pinned to 26 (matches dev),
 # so the start command needs no --experimental-sqlite flag.
-FROM node:26-bookworm-slim AS runtime
+FROM node:26-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
