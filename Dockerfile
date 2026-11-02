@@ -8,7 +8,7 @@ FROM oven/bun:1@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b40
 # Node base (not the bun image) so the build runs under Node: db.ts imports the
 # built-in node:sqlite, which Bun's runtime has no equivalent for and would fail
 # to resolve during `vite build`. Bun is still used as the fast package manager.
-FROM node:26-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS builder
+FROM node:26-bookworm-slim@sha256:bc0a2afd3b74ce12222fc8bab99271e66257f021078f5f4a5d687a77d280c1d9 AS builder
 WORKDIR /app
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 
@@ -34,7 +34,7 @@ RUN bun install --production --frozen-lockfile
 # ---- runtime: Node with built-in node:sqlite, non-root, on the shared volume ----
 # node:sqlite is stable and unflagged on Node 24+; pinned to 26 (matches dev),
 # so the start command needs no --experimental-sqlite flag.
-FROM node:26-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS runtime
+FROM node:26-bookworm-slim@sha256:bc0a2afd3b74ce12222fc8bab99271e66257f021078f5f4a5d687a77d280c1d9 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
