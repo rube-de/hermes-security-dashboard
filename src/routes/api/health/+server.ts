@@ -5,7 +5,7 @@ import type { RequestHandler } from './$types';
 export const GET: RequestHandler = () => {
 	try {
 		db.prepare('SELECT 1').get();
-		return json({ ok: true, service: 'hermes-security-dashboard' });
+		return json({ ok: true, service: 'hermes-security-dashboard', capabilities: { issueContinuity: 1 } });
 	} catch (err) {
 		return json(
 			{

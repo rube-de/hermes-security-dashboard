@@ -1,3 +1,10 @@
+import {
+	associateIssue,
+	resolveIssueId,
+	issueFirstSeenTimes,
+	validateContinuity,
+	validateContinuityOccurrences
+} from './issue-continuity';
 import { randomUUID } from 'node:crypto';
 import { db } from './db';
 import { getRepoRow } from './repos';
@@ -9,6 +16,9 @@ import { sanitizeReportHtml } from './sanitize';
 import type { ResolvedFinding, Severity } from '$lib/types';
 
 export interface FindingInput {
+	issueId?: string;
+	continuityEvidence?: string;
+	noveltyReason?: string;
 	severity: Severity;
 	title: string;
 	file?: string;
@@ -55,6 +65,13 @@ export function insertReview(
 	repoId: string,
 	input: ReviewInput
 ): { id: string; duplicate: boolean } {
+	return tx(() => insertReviewInTransaction(repoId, input));
+}
+
+function insertReviewInTransaction(
+	repoId: string,
+	input: ReviewInput
+): { id: string; duplicate: boolean } {
 	const repo = getRepoRow(repoId);
 	if (!repo) throw new Error(`unknown repo: ${repoId}`);
 
@@ -66,8 +83,39 @@ export function insertReview(
 	// Store every finding: canonicalFindings() only drops unknown severities and collapses
 	// exact duplicates (same issue identity at the same line + locationKey). Several
 	// locations of one issue are separate rows sharing a `fingerprint` (the identity); the
-	// counts, the diff, the union and triage all key on that identity, never on rows.
+	// Review grouping remains raw. Novelty, commit unions and triage resolve explicit
+	// canonical aliases separately; no input fields or historical rows are re-keyed.
+	for (const f of input.findings ?? []) validateContinuity(f);
+	validateContinuityOccurrences(input.findings ?? []);
 	const findings = canonicalFindings(input.findings ?? []);
+	for (const f of input.findings ?? []) {
+		if (f.issueId) {
+			const raw = issueIdentity(f);
+			if (
+				resolveIssueId(repoId, raw) !== f.issueId &&
+				db
+					.prepare('SELECT 1 FROM findings WHERE repo_id = ? AND fingerprint = ? LIMIT 1')
+					.get(repoId, raw)
+			)
+				throw new Error(
+					'conflicting known raw fingerprint reassignment requires the explicit reviewed alias endpoint'
+				);
+			const prior = db
+				.prepare(
+					'SELECT review_id FROM findings WHERE repo_id = ? AND fingerprint = ? ORDER BY id LIMIT 1'
+				)
+				.get(repoId, f.issueId) as { review_id: string } | undefined;
+			associateIssue(repoId, issueIdentity(f), f.issueId, f.continuityEvidence ?? '', {
+				actor: 'review-submission',
+				sourceReviewIds: [...(prior ? [prior.review_id] : []), reviewId]
+			});
+		}
+	}
+
+	for (const f of input.findings ?? []) {
+		if (f.issueId && resolveIssueId(repoId, f.issueId) !== f.issueId)
+			throw new Error('conflicting associations: submitted issueId is no longer canonical');
+	}
 
 	// Idempotent on scan content, not (repo, commit): a commit can be scanned many
 	// times. A resubmit with the same content (commit + model + engine + issue set)
@@ -87,19 +135,14 @@ export function insertReview(
 	// over every row without double-counting. firstSeen is clamped with the earliest known
 	// time so a finding's stored first_seen_at never post-dates its own review; every
 	// location of an issue shares it.
-	const earliest = new Map<string, number | null>();
+	const earliest = issueFirstSeenTimes(repoId);
 	const newIds = new Set<string>();
 	const prepared = findings.map((f) => {
 		const fp = issueIdentity(f);
-		if (!earliest.has(fp)) {
-			const seen = db
-				.prepare('SELECT MIN(first_seen_at) AS m FROM findings WHERE repo_id = ? AND fingerprint = ?')
-				.get(repoId, fp) as { m: number | null };
-			earliest.set(fp, seen.m);
-		}
-		const m = earliest.get(fp) ?? null;
-		const isNew = m === null && !newIds.has(fp);
-		if (isNew) newIds.add(fp);
+		const issueId = resolveIssueId(repoId, fp);
+		const m = earliest.get(issueId) ?? null;
+		const isNew = m === null && !newIds.has(issueId);
+		if (isNew) newIds.add(issueId);
 		return { f, file: f.file ?? '', fp, isNew, firstSeen: m === null ? now : Math.min(m, now) };
 	});
 	const newCount = newIds.size;
@@ -114,7 +157,7 @@ export function insertReview(
 		.prepare('SELECT 1 FROM reviews WHERE repo_id = ? AND commit_hash = ? LIMIT 1')
 		.get(repoId, input.commit);
 	const prevCommit = isFirstScanOfCommit ? (repoHead(repoId, input.commit)?.commit ?? null) : null;
-	const curFps = new Set(prepared.map((p) => p.fp));
+	const curFps = new Set(prepared.map((p) => resolveIssueId(repoId, p.fp)));
 	const resolved: ResolvedFinding[] = prevCommit
 		? unionFindingsForCommit(repoId, prevCommit)
 				.filter((f) => !curFps.has(f.fingerprint))
@@ -129,7 +172,7 @@ export function insertReview(
 	const lines = input.lines ?? repo.lines;
 	const html = input.html ? sanitizeReportHtml(input.html) : null;
 
-	tx(() => {
+	{
 		db.prepare(
 			`INSERT INTO reviews
 			 (id, repo_id, commit_hash, model, trigger, engine, summary, html, duration_secs, lines,
@@ -160,8 +203,8 @@ export function insertReview(
 		const ins = db.prepare(
 			`INSERT INTO findings
 			 (review_id, repo_id, severity, title, file, line, cwe, description, code,
-			  recommendation, fingerprint, is_new, first_seen_at, rule_id, location_key)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			  recommendation, fingerprint, is_new, first_seen_at, rule_id, location_key, submitted_issue_id, continuity_evidence, novelty_reason)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		);
 		for (const p of prepared) {
 			ins.run(
@@ -179,10 +222,13 @@ export function insertReview(
 				p.isNew ? 1 : 0,
 				p.firstSeen,
 				p.f.ruleId ?? '',
-				p.f.locationKey ?? ''
+				p.f.locationKey ?? '',
+				p.f.issueId ?? '',
+				p.f.continuityEvidence ?? '',
+				p.f.noveltyReason ?? ''
 			);
 		}
-	});
+	}
 
 	return { id: reviewId, duplicate: false };
 }

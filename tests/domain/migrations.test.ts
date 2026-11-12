@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { LATEST_VERSION, migrate } from '$lib/server/migrations';
+import { LATEST_VERSION, MIGRATIONS, migrate } from '$lib/server/migrations';
 
 function userVersion(db: DatabaseSync): number {
 	return Number(db.prepare('PRAGMA user_version').get()?.user_version);
@@ -73,6 +73,39 @@ function insertReview(db: DatabaseSync, id: string, commit: string, createdAt: n
 }
 
 describe('migrate', () => {
+	it('adds continuity metadata to version 3 without rehashing or rewriting historical snapshots and human tags', () => {
+		const db = earliestReleaseDb();
+		for (const migration of MIGRATIONS.slice(0, 3)) migration(db);
+		db.exec('PRAGMA user_version = 3');
+		db.prepare("INSERT INTO repos (id, lang, created_at) VALUES ('r1', 'TS', 0)").run();
+		insertReview(db, 'rv-original', 'c1', 1000);
+		db.exec("UPDATE findings SET rule_id = 'Exact.Rule', location_key = 'Handler.process'");
+		db.prepare('UPDATE reviews SET content_hash = ?, resolved_json = ?').run(
+			'unchanged-original-hash',
+			JSON.stringify([{ title: 'Original snapshot' }])
+		);
+		db.prepare(
+			"INSERT INTO finding_triage (repo_id, fingerprint, status, note, fp_title, fp_file, created_at, updated_at, triaged_by) VALUES ('r1', 'fp-1', 'acknowledged', 'Synthetic note', 'Original title', 'src/handler.ts', 100, 200, 'test-human')"
+		).run();
+		const findings = db.prepare('SELECT * FROM findings').all();
+		const reviews = db.prepare('SELECT * FROM reviews').all();
+		const triage = db.prepare('SELECT * FROM finding_triage').all();
+		migrate(db);
+		expect(db.prepare('SELECT * FROM reviews').all()).toEqual(reviews);
+		expect(db.prepare('SELECT * FROM finding_triage').all()).toEqual(triage);
+		expect(db.prepare('SELECT * FROM issue_aliases').all()).toEqual([]);
+		expect(db.prepare('SELECT * FROM findings').all()).toEqual(
+			findings.map((f) => ({
+				...f,
+				submitted_issue_id: '',
+				continuity_evidence: '',
+				novelty_reason: ''
+			}))
+		);
+		expect(userVersion(db)).toBe(LATEST_VERSION);
+		db.close();
+	});
+
 	it('stamps a fresh database with the latest version', () => {
 		const db = new DatabaseSync(':memory:');
 		migrate(db);
@@ -80,6 +113,7 @@ describe('migrate', () => {
 		expect(shape(db).tables).toEqual([
 			'finding_triage',
 			'findings',
+			'issue_aliases',
 			'meta',
 			'repos',
 			'reviews',

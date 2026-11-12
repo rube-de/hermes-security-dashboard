@@ -45,6 +45,20 @@ BEGIN
 END;
 `;
 
+const ISSUE_CONTINUITY_SQL = `CREATE TABLE issue_aliases (
+ repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+ fingerprint TEXT NOT NULL,
+ issue_id TEXT NOT NULL,
+ reason TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ actor TEXT NOT NULL,
+ source_review_ids TEXT NOT NULL,
+ PRIMARY KEY (repo_id, fingerprint)
+);
+CREATE TRIGGER trg_issue_aliases_bump_insert AFTER INSERT ON issue_aliases BEGIN
+ ${BUMP_DATA_VERSION}
+END;`;
+
 /** Latest schema, applied as-is to a fresh database. */
 export const SCHEMA = `
 CREATE TABLE repos (
@@ -103,7 +117,10 @@ CREATE TABLE findings (
   is_new         INTEGER NOT NULL DEFAULT 0,
   first_seen_at  INTEGER NOT NULL,
   rule_id        TEXT NOT NULL DEFAULT '',
-  location_key   TEXT NOT NULL DEFAULT ''
+  location_key   TEXT NOT NULL DEFAULT '',
+  submitted_issue_id TEXT NOT NULL DEFAULT '',
+  continuity_evidence TEXT NOT NULL DEFAULT '',
+  novelty_reason TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX idx_findings_review ON findings(review_id);
 CREATE INDEX idx_findings_fp ON findings(repo_id, fingerprint);
@@ -145,6 +162,7 @@ CREATE TABLE meta (
 );
 
 ${DATA_VERSION_SQL}
+${ISSUE_CONTINUITY_SQL}
 `;
 
 type Migration = (db: DatabaseSync) => void;
@@ -166,7 +184,11 @@ export const MIGRATIONS: readonly Migration[] = [
 		`);
 	},
 	// 3: live `meta.data_version` counter.
-	(db) => db.exec(DATA_VERSION_SQL)
+	(db) => db.exec(DATA_VERSION_SQL),
+ (db) => db.exec(`${ISSUE_CONTINUITY_SQL}
+ ALTER TABLE findings ADD COLUMN submitted_issue_id TEXT NOT NULL DEFAULT '';
+ ALTER TABLE findings ADD COLUMN continuity_evidence TEXT NOT NULL DEFAULT '';
+ ALTER TABLE findings ADD COLUMN novelty_reason TEXT NOT NULL DEFAULT '';`)
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length;

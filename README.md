@@ -36,7 +36,7 @@ On first boot the database is seeded with demo data (10 Oasis repos, realistic
 findings, review history, a live scan). It's a no-op once real data exists.
 
 Config via env (see `.env.example`): `HERMES_DB` (db path), `PORT`,
-`HERMES_API_TOKEN` (optional write auth). For production — Docker, sub-path
+`HERMES_API_TOKEN` (write auth; mandatory for explicit alias creation). For production — Docker, sub-path
 hosting, and durable storage — see [Deploy](#deploy).
 
 Drive the live UI like the real agent would:
@@ -146,7 +146,7 @@ Point the sync sidecar at the snapshot file (default `${HERMES_DB}.snapshot`),
 | --- | --- | --- |
 | `HERMES_DB` | `hermes.db` (`/data/hermes.db` in Docker) | Live SQLite path |
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | adapter-node bind |
-| `HERMES_API_TOKEN` | _unset_ | Bearer auth for writes; unset = open (loud startup warning in production) |
+| `HERMES_API_TOKEN` | _unset_ | Bearer auth for agent writes; unset = open except alias POST, which fails closed with 503 (loud startup warning in production) |
 | `HERMES_SEED_DEMO` | `false` (prod) / `true` (dev) | Seed demo data on an empty DB; in dev on by default, set `true` in production to seed |
 | `HERMES_DB_SNAPSHOT` | `${HERMES_DB}.snapshot` | Snapshot file the sync layer copies |
 | `HERMES_SNAPSHOT_INTERVAL` | `300` | Seconds between snapshot/checkpoint cycles |
@@ -222,8 +222,10 @@ and renders browsable docs:
 The tables below mirror the spec, and a contract test checks the read responses
 against it.
 
-Base path `/api`. Reads are open; **writes** honour `HERMES_API_TOKEN` if set
-(`Authorization: Bearer <token>`), otherwise are unauthenticated. Read responses
+Base path `/api`. Reads are open; agent **writes** honour `HERMES_API_TOKEN` if set
+(`Authorization: Bearer <token>`), otherwise are unauthenticated. Explicit issue-alias
+POST always requires configured token authentication (503 if unconfigured, 401 for
+a missing/invalid token). Read responses
 carry raw values, not display strings: timestamps are epoch-ms (`createdAt`,
 `lastRunAt`, `nextRunAt`) and durations are seconds (`durationSecs`,
 `lastDurationSecs`, `avgScanSecs`); formatting is up to the client.
@@ -248,6 +250,8 @@ curl -X POST http://hermes-security-dashboard:3000/security/api/repos/:id/review
 | Method | Endpoint                     | Purpose                                |
 | ------ | ---------------------------- | -------------------------------------- |
 | GET    | `/api/health`                | Liveness check                         |
+| GET    | `/api/repos/:id/issue-aliases` | List audited issue associations       |
+| POST   | `/api/repos/:id/issue-aliases` | Explicitly associate a raw fingerprint with a canonical root (token required) |
 | GET    | `/api/overview`              | Aggregate metrics + repo summaries     |
 | GET    | `/api/repos`                 | List repositories                      |
 | POST   | `/api/repos`                 | Register / update a repository         |
@@ -291,7 +295,7 @@ previous commit's union. These scan snapshots also feed the daily trend aggregat
 they are not the commit-history delta.
 
 `GET /api/repos/:id` exposes `commits`, newest introduced commit first, alongside
-the flat `reviews` list. Each commit's `counts` unions every scan's issues, takes
+the flat `reviews` list. Each commit's `counts` unions every scan's canonical issues, takes
 the worst severity for each identity, and excludes findings quieted by triage,
 just like the overview. Its `newCount` and `fixedCount` compare that union with the
 immediately preceding commit's union: an issue absent before is new, one absent
@@ -331,7 +335,9 @@ curl -X POST localhost:3000/api/repos/sapphire-paratime/reviews \
 ```
 
 `severity` is one of `crit` | `high` | `med` | `low`. `commit` and each
-finding's `severity` + `title` are required; everything else is optional. The
+finding's `severity` + `title` are required; other fields are optional, except that
+an `issueId` different from the computed raw fingerprint requires `continuityEvidence`
+(see [Canonical issue continuity](#canonical-issue-continuity)). The
 numeric fields (`durationSecs`, `lines`, `filesScanned`, a finding's `line`) must
 be non-negative integers, and `findings`, when present, must be an array. A
 malformed body is a 400 and stores nothing.
@@ -342,7 +348,7 @@ empty `engine`/`trigger` and omits an empty `model`/`agentVersion`). Without a
 `summary`, the report shows a one-line summary built from the review's own data
 (issue counts by severity, files, engine, model).
 
-Every finding is stored. Findings that share an **identity** (see
+Every finding is stored. Findings that share a **raw identity** (see
 [Finding identity](#finding-identity)) are one issue with several locations, shown
 as e.g. "2 locations: L88, L140"; only exact duplicates (same identity at the same
 line + `locationKey`) collapse, keeping the most severe.
@@ -351,10 +357,11 @@ A commit can be scanned more than once — LLM reviews are non-deterministic, an
 may run several models against the same code. Submits are therefore idempotent on
 scan **content**, not on `(repo, commit)`. The content key is `commit` + `model` +
 `engine` + the issue set, where each issue contributes only its identity and most
-severe `severity` (the same identity used for the new/carried/resolved diff). A
+severe `severity` for legacy submissions. Continuity-aware submissions additionally
+retain raw continuity claims in their content key (see below). A
 resubmit with the same key returns the existing review (`duplicate: true`, HTTP 200);
 a re-run that finds a different issue, drops one, changes a severity, or runs a
-different `model` is stored as its own review. Note the key ignores a finding's
+different `model` is stored as its own review. For legacy payloads only, the key ignores a finding's
 `line`/`description`/`recommendation`/`code`, so a retry that only rewords those (or
 moves a line) dedups to the first report. Review history has one row per commit:
 a single scan links directly to its report; multiple scans expand to individual
@@ -390,8 +397,9 @@ to the task prompt verbatim:
   `(*Server).Handle`. Name the symbol, not the line: lines shift between commits,
   the symbol doesn't. Omit it for file-level findings (pragma, config).
 
-`ruleId` + `file` + `locationKey` become the finding's identity (see below), so
-the same issue must get the same values on every run.
+`ruleId` + `file` + `locationKey` become the finding's raw identity (see below), so
+keep them stable where possible; use explicit continuity evidence when the same issue
+needs to be associated across changed raw identities.
 
 Each is a string of at most 200 characters after trimming; a wrong type or a
 longer value is a 400. All three are optional, and payloads without them keep
@@ -399,8 +407,8 @@ working.
 
 ### Finding identity
 
-Each finding gets an identity, the `fingerprint` the new/carried/resolved diff,
-the counts, the commit union and triage tags all key on:
+Each finding gets an immutable raw identity, its `fingerprint`. Review grouping and
+raw counts keep this identity; canonical issue continuity is a separate layer:
 
 - **With a `ruleId`**: `ruleId` + `file` + `locationKey`. The title is not part of
   it, so an LLM rewording a title between runs, or the code moving down a few
@@ -411,10 +419,89 @@ the counts, the commit union and triage tags all key on:
   fields existed. Old findings and their triage tags keep their keys; nothing is
   re-keyed. A `locationKey` alone is shown but doesn't split issues.
 
-Each component is trimmed and compared case-insensitively. When the agent starts
-sending `ruleId`, those findings move to new identities once: on that commit they
-show as new, the old file + title issues as resolved, and earlier triage tags don't
-carry over to them (re-tag the ones that still apply).
+Each component is trimmed and compared case-insensitively. Starting to send `ruleId`
+changes the raw identity. Without an explicit continuity association, that is a new
+issue and earlier triage does not carry over. There is no historical data rewrite,
+automatic fuzzy matching, or automatic migration of old identities.
+
+### Canonical issue continuity
+
+Review finding inputs optionally accept:
+
+| Field | Contract |
+| --- | --- |
+| `issueId` | Exactly 16 lowercase hexadecimal characters (`^[0-9a-f]{16}$`), naming an existing canonical root in this repository, not an alias or another repository's issue. |
+| `continuityEvidence` | Nonblank string, 1..2000 characters; required when `issueId` differs from the computed raw fingerprint. |
+| `noveltyReason` | Optional nonblank string, 1..2000 characters explaining why a finding is distinct. |
+
+For these fields, null, wrong types and blank values are rejected, not treated as
+omission. `issueId` together with `noveltyReason` is contradictory and rejected.
+`continuityEvidence` without `issueId` is rejected. A new raw fingerprint can link
+an existing root using evidence. A previously stored raw fingerprint cannot be
+reassigned to another canonical component by submitting a review: use the separately
+reviewed alias API first. Membership claims in an already-linked component remain valid. Payloads omitting
+them remain valid. Duplicate-place findings with any continuity metadata must carry
+identical complete accepted evidence; conflicting claims are rejected before alias
+creation or content deduplication, rather than dropping a claim. Ingest evidence creates an audited
+alias with actor `review-submission`, the current resulting review ID and prior
+root review references; this actor does not identify a human.
+
+Finding outputs retain their raw `fingerprint` and add the resolved `issueId`.
+Persisted `continuityEvidence`, `noveltyReason` and `submittedIssueId` are strings
+and may be empty when not supplied. `submittedIssueId` records the input claim,
+not a replacement for the currently resolved root. The `locations` shape remains
+exactly `{file, line, locationKey}`. Different raw groups are not collapsed in
+review reports, and review raw counts remain raw. Stored discovery/resolution
+snapshots and their historical trend buckets are immutable. Commit unions,
+current repository counts, model uniqueness and new/fixed commit transitions
+resolve canonical issue IDs at read time, so an association can change those
+current-derived views without rewriting a review or its discovery snapshot.
+
+Legacy submissions keep their existing content hashes. Continuity-aware submissions
+deduplicate using raw reported fields (including title, rule, location, line and source
+text) and continuity fields, not resolved canonical identity alone: changing evidence, novelty or an explicit identity claim must not be
+silently swallowed as a retry merely because both submissions resolve to one issue.
+
+#### Explicit alias API
+
+`GET /api/repos/{id}/issue-aliases` returns `{aliases: [...]}`, containing audit entries
+`{fingerprint, issueId, reason, createdAt, actor, sourceReviewIds}` (`createdAt` is
+epoch-ms). Entries preserve the direct target chosen at association time; following
+subsequent edges resolves the current root. A missing repository returns 404.
+
+`POST /api/repos/{id}/issue-aliases` accepts:
+
+```json
+{
+  "fingerprint": "0123456789abcdef",
+  "issueId": "fedcba9876543210",
+  "reason": "Same issue after the enclosing symbol was renamed; both reviews show the same unchecked call.",
+  "sourceReviewIds": ["source-review-id", "canonical-root-review-id"]
+}
+```
+
+Both IDs must match `^[0-9a-f]{16}$` exactly. `reason` is nonblank, 1..4000
+characters. `sourceReviewIds` contains 1..100 nonblank review ID strings, each at
+most 200 characters. Both source and target must exist in this repository; every
+reference must be repository-local, with the referenced evidence covering both
+the source fingerprint and canonical target. The target must already be a canonical
+root. Reparenting, conflicting edges, cycles and conflicting human triage are rejected;
+triage conflicts require manual reconciliation rather than silently picking a verdict.
+
+Authentication is mandatory: an unconfigured server token returns 503; missing or
+invalid bearer credentials return 401. The recorded actor is fixed `api-token`,
+not a person claimed by the request or a forwarded identity header. A successful
+creation returns HTTP 201 with `{ok: true, duplicate: false, alias: {...}}`.
+Repeating the exact edge returns HTTP 200 with `duplicate: true` and the original
+alias while the supplied target remains canonical; it does not overwrite the reason,
+timestamp, actor or source references. Alias creation never changes a human triage row.
+Later explicit human triage updates or clears through either root or alias apply to
+the entire component, preserving existing tag keys, creation times and tag-time snapshots
+unless the human explicitly clears the component.
+
+Successful `GET /api/health` responses advertise `capabilities: {issueContinuity: 1}`.
+This describes the responding code's capability, not a claim that any particular
+deployment has been upgraded or its historical data migrated.
 
 ### Read reviews / trends
 
@@ -475,7 +562,9 @@ curl -X PUT localhost:3000/api/repos/sapphire-paratime/findings/8d2b.../triage \
 ```
 
 Triage verdicts (`acknowledged`, `false_positive`, `accepted_risk`, or `open`/null to clear)
-attach to a finding's stable `(repo, fingerprint)` identity and persist across agent re-runs.
+attach to a repository's issue identity and persist across agent re-runs; explicitly
+associated fingerprints resolve to the canonical issue. Aliases never silently
+resolve conflicting human verdicts.
 `false_positive` and `accepted_risk` quiet the finding from headline severity counts.
 
 **Attribution:** The endpoint inspects the `x-hermes-user` header, set by the wallet gateway
@@ -495,11 +584,11 @@ The endpoints `GET /api/repos/:id/rerun` and `POST /api/repos/:id/rerun` record 
 run), `meta` (`data_version`, next run, org label, etc.). SQLite triggers increment
 `meta.data_version` on every write (repo, review, triage, or scan state transition).
 Each finding row is one location of an issue; rows of the same issue share a stable
-`fingerprint` (its [identity](#finding-identity)) so the issue is tracked run-over-run —
-that's what powers the new/carried/resolved diff and per-finding age ("open N runs"). The
+`fingerprint` (its [raw identity](#finding-identity)). Audited `issue_aliases` associate
+raw fingerprints with repo-scoped canonical roots without rewriting those rows. The
 API/TypeScript `Finding` type is the issue-level view: findings grouped by `fingerprint`,
 with each location in `locations` (see [`GLOSSARY.md`](GLOSSARY.md) for issue vs finding). Server data
 access lives in `src/lib/server/`: `db.ts` (connection) and `migrations.ts` (versioned
 schema), one module per domain (`repos.ts`, `commits.ts`, `reviews.ts`, `ingest.ts`,
-`triage.ts`, `overview.ts`, `trends.ts`, `scan.ts`, `meta.ts`), plus `seed.ts`,
+`triage.ts`, `issue-continuity.ts`, `overview.ts`, `trends.ts`, `scan.ts`, `meta.ts`), plus `seed.ts`,
 `durability.ts`, `sanitize.ts` and `auth.ts`.

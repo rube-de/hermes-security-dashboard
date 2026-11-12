@@ -1,10 +1,17 @@
+import { resolveIssueId } from './issue-continuity';
 import { db } from './db';
 import { type ReviewRow, type FindingRow } from './rows';
 import { countsForReview } from './commits';
 import { triageMapForRepo } from './triage';
 import { fingerprint } from './fingerprint';
 import { SEVERITIES, countSeverities, quiets } from '$lib/format';
-import type { Finding, ResolvedFinding, ReviewDetail, ReviewSummary, SeverityCounts } from '$lib/types';
+import type {
+	Finding,
+	ResolvedFinding,
+	ReviewDetail,
+	ReviewSummary,
+	SeverityCounts
+} from '$lib/types';
 
 // SQL severity ordering, derived from SEVERITIES so it can't drift from SEV_RANK.
 // SEVERITIES holds only fixed internal keys, so interpolation here is injection-safe.
@@ -78,7 +85,8 @@ export function listReviews(opts: ListReviewsOpts = {}): ReviewSummary[] {
 }
 
 export function getReviewDetail(reviewId: string): ReviewDetail | null {
-	const rv = db.prepare('SELECT * FROM reviews WHERE id = ?').get(reviewId) as ReviewRow | undefined;
+	const rv = db.prepare('SELECT * FROM reviews WHERE id = ?').get(reviewId) as
+		ReviewRow | undefined;
 	if (!rv) return null;
 	const rows = db
 		.prepare(`SELECT * FROM findings WHERE review_id = ? ORDER BY ${SEV_ORDER_SQL}, id`)
@@ -110,9 +118,7 @@ export function getReviewDetail(reviewId: string): ReviewDetail | null {
 		const ageHours = Math.max(0, (rv.created_at - f.first_seen_at) / 3_600_000);
 		const openRuns = Math.max(
 			1,
-			new Set(
-				runRows.filter((r) => r.created_at >= f.first_seen_at).map((r) => r.commit_hash)
-			).size
+			new Set(runRows.filter((r) => r.created_at >= f.first_seen_at).map((r) => r.commit_hash)).size
 		);
 		return {
 			severity: f.severity,
@@ -132,7 +138,11 @@ export function getReviewDetail(reviewId: string): ReviewDetail | null {
 			openRuns,
 			ageHours: Math.round(ageHours),
 			fingerprint: f.fingerprint,
-			triage: triage.get(f.fingerprint) ?? null
+			issueId: resolveIssueId(rv.repo_id, f.fingerprint),
+			submittedIssueId: f.submitted_issue_id,
+			continuityEvidence: f.continuity_evidence,
+			noveltyReason: f.novelty_reason,
+			triage: triage.get(resolveIssueId(rv.repo_id, f.fingerprint)) ?? null
 		};
 	});
 
@@ -152,7 +162,7 @@ export function getReviewDetail(reviewId: string): ReviewDetail | null {
 	// stops reporting must not read as a "fix".
 	const resolved: ResolvedFinding[] = stored
 		.map((rf) => ({ ...rf, fingerprint: rf.fingerprint ?? fingerprint(rf.file, rf.title) }))
-		.filter((rf) => !quiets(triage.get(rf.fingerprint)));
+		.filter((rf) => !quiets(triage.get(resolveIssueId(rv.repo_id, rf.fingerprint))));
 
 	const summary = reviewSummary(rv, counts);
 	return {
