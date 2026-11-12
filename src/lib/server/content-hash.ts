@@ -13,14 +13,44 @@ import { issueIdentity, SEVERITY_ORDER, type IdentityFields } from './fingerprin
  *   - a severity change for an existing issue
  *
  * Volatile, derived fields (duration, summary prose, html body, timestamps, agent
- * version) and a finding's location within its issue (line) are deliberately excluded —
- * they don't change *what was found*, so a retry that differs only in those still dedups.
+ * version) are excluded. Legacy hashes also ignore occurrence line/source text.
+ * Continuity-aware submissions retain all accepted raw finding evidence, so changed
+ * source reports cannot silently resolve to an older, differently worded report.
  */
 export interface ScanIdentity {
 	commit: string;
 	model: string;
 	engine: string;
-	findings: (IdentityFields & { severity: string })[];
+	findings: (IdentityFields & {
+		severity: string;
+		line?: number | null;
+		cwe?: string;
+		description?: string;
+		code?: string;
+		recommendation?: string;
+		issueId?: string;
+		continuityEvidence?: string;
+		noveltyReason?: string;
+	})[];
+}
+
+/** Exact accepted finding evidence, shared by continuity dedup validation and hashing. */
+export function reportedFindingKey(f: ScanIdentity['findings'][number]): string {
+	return JSON.stringify([
+		f.severity,
+		f.title,
+		f.file ?? '',
+		f.line ?? 0,
+		f.ruleId ?? '',
+		f.locationKey ?? '',
+		f.cwe ?? '',
+		f.description ?? '',
+		f.code ?? '',
+		f.recommendation ?? '',
+		f.issueId ?? '',
+		f.continuityEvidence ?? '',
+		f.noveltyReason ?? ''
+	]);
 }
 
 export function contentHash(s: ScanIdentity): string {
@@ -46,6 +76,19 @@ export function contentHash(s: ScanIdentity): string {
 	// a raw separator (e.g. '\n') could appear inside an agent-controlled value and
 	// let two distinct scans collide; JSON escaping keeps field boundaries
 	// unambiguous regardless of field contents.
-	const canonical = JSON.stringify([s.commit.trim(), s.model.trim(), s.engine.trim(), keys]);
+	// Continuity-aware submissions preserve reported evidence in content identity. The
+	// canonical issue ID is NOT a replacement for source identity or source snapshots.
+	// Legacy payloads keep their byte-identical historical content hashes.
+	const raw = s.findings.some(
+		(f) =>
+			f.issueId !== undefined || f.continuityEvidence !== undefined || f.noveltyReason !== undefined
+	)
+		? s.findings.map(reportedFindingKey).sort()
+		: null;
+	const canonical = JSON.stringify(
+		raw === null
+			? [s.commit.trim(), s.model.trim(), s.engine.trim(), keys]
+			: ['CONTINUITY-1', s.commit.trim(), s.model.trim(), s.engine.trim(), raw]
+	);
 	return createHash('sha256').update(canonical).digest('hex');
 }

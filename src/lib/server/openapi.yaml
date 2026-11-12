@@ -11,7 +11,10 @@ info:
     **Auth.** Reads are open. Writes (the agent-facing mutations) honour
     `HERMES_API_TOKEN`: if it is set, they require `Authorization: Bearer <token>`
     and return `401 {"error":"unauthorized"}` otherwise; if it is unset, writes
-    are unauthenticated (and the server logs a loud startup warning).
+    are unauthenticated (and the server logs a loud startup warning). Exception:
+    explicit issue-alias POST always requires a configured token, returning 503
+    when unconfigured and 401 for missing/invalid credentials. Its actor is
+    `api-token`, not an asserted human identity.
 
     **Base path.** When the image is built with `BASE_PATH` (e.g. `/security`),
     every path below — UI *and* `/api/*` — is served only under that prefix, and
@@ -68,10 +71,94 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [ok, service]
+                required: [ok, service, capabilities]
                 properties:
                   ok: { type: boolean }
                   service: { type: string }
+                  capabilities:
+                    type: object
+                    required: [issueContinuity]
+                    description: Capability of the responding code, not a deployment or migration claim.
+                    properties:
+                      issueContinuity: { type: integer, const: 1 }
+
+  /api/repos/{id}/issue-aliases:
+    get:
+      tags: [Repositories]
+      operationId: listIssueAliases
+      summary: List audited repository-local issue associations
+      parameters:
+        - $ref: '#/components/parameters/RepoId'
+      responses:
+        '200':
+          description: Alias audit entries; no historical finding rows are rewritten
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [aliases]
+                properties:
+                  aliases:
+                    type: array
+                    items: { $ref: '#/components/schemas/IssueAlias' }
+        '404':
+          description: Repository not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      tags: [Repositories]
+      operationId: createIssueAlias
+      summary: Associate a raw fingerprint with an existing canonical root
+      description: |
+        Both source and target must exist in this repository. The target must be
+        a canonical root, not an alias. All sourceReviewIds must belong to this
+        repository, and together cover both source and target fingerprints.
+        Reparenting, conflicting edges, cycles and conflicting human triage are
+        rejected; triage conflicts require manual reconciliation. No fuzzy match,
+        historical rewrite or automatic migration occurs.
+
+        Authentication is mandatory even when other agent writes are open. Actor
+        is fixed to api-token, not a claimed person. Repeating the exact edge is
+        idempotent and returns the original audit record without replacing its
+        reason, creation time, actor or source references.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RepoId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IssueAliasInput' }
+      responses:
+        '201':
+          description: Alias created; duplicate is false
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IssueAliasResponse' }
+        '200':
+          description: Exact edge already exists; duplicate is true and audit is unchanged
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IssueAliasResponse' }
+        '400':
+          description: Invalid body, unknown or nonlocal evidence, non-root target, reparenting, conflicting edge, cycle, or human triage conflict
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Repository not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: HERMES_API_TOKEN is not configured; alias writes fail closed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/overview:
     get:
@@ -317,7 +404,16 @@ paths:
         only on a commit's first scan against the previous commit's union. These are
         scan snapshots, not commit-history deltas: `GET /api/repos/{id}` exposes
         `commits`, whose new/fixed counts compare consecutive commits' complete unions
-        at read time. The repository must be registered first.
+        at read time using canonical issue IDs. Raw review grouping and counts
+        remain raw; stored discovery/resolution snapshots are immutable.
+
+        Optional issueId must name an existing repo-local canonical root, with
+        continuityEvidence required when it differs from the computed raw
+        fingerprint. Evidence creates an audited alias with actor review-submission
+        (not a human identity), the resulting review ID and prior root review
+        references. Continuity-aware content keys include raw reported identity
+        and continuity fields, not just canonical identity. Legacy content hashes
+        remain unchanged. The repository must be registered first.
       security:
         - bearerAuth: []
       parameters:
@@ -521,7 +617,8 @@ components:
       scheme: bearer
       description: |
         `Authorization: Bearer <HERMES_API_TOKEN>`. Required on write operations
-        only when `HERMES_API_TOKEN` is set on the server.
+        only when `HERMES_API_TOKEN` is set on the server, except issue-alias POST,
+        which always requires a configured token and fails closed otherwise.
 
   parameters:
     RepoId:
@@ -547,6 +644,62 @@ components:
           example: { error: unauthorized }
 
   schemas:
+    IssueIdentity:
+      type: string
+      pattern: '^[0-9a-f]{16}$'
+      minLength: 16
+      maxLength: 16
+      description: Exactly 16 lowercase hexadecimal characters; never normalized or repaired.
+
+    ContinuityText:
+      type: string
+      minLength: 1
+      maxLength: 4000
+      pattern: '\S'
+      description: Nonblank text; null, wrong types and whitespace-only values are rejected.
+
+    SourceReviewIds:
+      type: array
+      minItems: 1
+      maxItems: 100
+      items:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: '\S'
+      description: Repository-local review IDs whose evidence covers both source and canonical target.
+
+    IssueAliasInput:
+      type: object
+      required: [fingerprint, issueId, reason, sourceReviewIds]
+      properties:
+        fingerprint: { $ref: '#/components/schemas/IssueIdentity' }
+        issueId: { $ref: '#/components/schemas/IssueIdentity' }
+        reason: { $ref: '#/components/schemas/ContinuityText' }
+        sourceReviewIds: { $ref: '#/components/schemas/SourceReviewIds' }
+
+    IssueAlias:
+      type: object
+      required: [fingerprint, issueId, reason, createdAt, actor, sourceReviewIds]
+      properties:
+        fingerprint: { $ref: '#/components/schemas/IssueIdentity' }
+        issueId: { $ref: '#/components/schemas/IssueIdentity' }
+        reason: { $ref: '#/components/schemas/ContinuityText' }
+        createdAt: { type: integer, description: Creation time in epoch-ms; immutable on retry }
+        actor:
+          type: string
+          enum: [api-token, review-submission]
+          description: Mechanism that recorded the association; not an identified human.
+        sourceReviewIds: { $ref: '#/components/schemas/SourceReviewIds' }
+
+    IssueAliasResponse:
+      type: object
+      required: [ok, duplicate, alias]
+      properties:
+        ok: { const: true }
+        duplicate: { type: boolean }
+        alias: { $ref: '#/components/schemas/IssueAlias' }
+
     Error:
       type: object
       required: [error]
@@ -664,7 +817,7 @@ components:
         counts:
           allOf: [{ $ref: '#/components/schemas/SeverityCounts' }]
           description: >-
-            Union of issues across all scans, one per fingerprint at its worst severity,
+            Union of issues across all scans, one per current canonical issueId at its worst severity,
             excluding false-positive and accepted-risk triage.
         newCount:
           type: integer
@@ -762,8 +915,22 @@ components:
 
     FindingInput:
       type: object
+      description: |
+        Legacy payloads without continuity fields remain valid. If issueId differs
+        from the computed raw fingerprint, continuityEvidence is required; this
+        semantic comparison is enforced by the server. Null, wrong types and blank
+        continuity fields are rejected, not treated as omission.
       required: [severity, title]
       properties:
+        issueId:
+          allOf: [{ $ref: '#/components/schemas/IssueIdentity' }]
+          description: Existing repository-local canonical root only; not a fingerprint that is itself aliased, or a cross-repository identity.
+        continuityEvidence:
+          allOf: [{ $ref: '#/components/schemas/ContinuityText' }]
+          description: Required when issueId differs from the computed raw fingerprint; creates an audited review-submission alias.
+        noveltyReason:
+          allOf: [{ $ref: '#/components/schemas/ContinuityText' }]
+          description: Optional explanation of why this reported finding is distinct.
         severity: { $ref: '#/components/schemas/Severity' }
         title: { type: string }
         file: { type: string }
@@ -790,6 +957,7 @@ components:
 
     FindingLocation:
       type: object
+      additionalProperties: false
       description: One place an issue was reported in a review.
       required: [file, line, locationKey]
       properties:
@@ -805,8 +973,23 @@ components:
         (then earliest-reported) location.
       required:
         [severity, title, file, line, cwe, description, code, recommendation, ruleId,
-         locationKey, locations, isNew, openRuns, ageHours, fingerprint, triage]
+         locationKey, locations, isNew, openRuns, ageHours, fingerprint, issueId, triage]
       properties:
+        issueId:
+          allOf: [{ $ref: '#/components/schemas/IssueIdentity' }]
+          description: Current resolved repo-scoped canonical root; equals raw fingerprint without an alias.
+        continuityEvidence:
+          type: string
+          maxLength: 4000
+          description: Persisted submission evidence; may be empty when not supplied.
+        noveltyReason:
+          type: string
+          maxLength: 4000
+          description: Persisted novelty explanation; may be empty when not supplied.
+        submittedIssueId:
+          type: string
+          pattern: '^([0-9a-f]{16})?$'
+          description: Original input issueId claim, or empty when omitted; distinct from the current resolved root.
         severity: { $ref: '#/components/schemas/Severity' }
         title: { type: string }
         file: { type: string }
@@ -830,10 +1013,12 @@ components:
         fingerprint:
           type: string
           description: >-
-            Stable per-repo issue identity: a hash of `ruleId` + `file` + `locationKey`
+            Immutable raw group identity: a hash of `ruleId` + `file` + `locationKey`
             when the agent sent a `ruleId`, else of `file` + `title` (the key every
-            finding had before `ruleId` existed). The key of the new/carried/resolved
-            diff, the counts, and triage: a verdict is attached to and addressed by it.
+            finding had before `ruleId` existed). Review grouping and raw counts retain
+            this identity; aliases never rewrite it or merge raw locations. Current
+            commit unions resolve canonical issueId separately; stored discovery
+            snapshots remain unchanged.
         triage:
           oneOf:
             - $ref: '#/components/schemas/Triage'

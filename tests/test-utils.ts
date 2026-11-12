@@ -7,6 +7,7 @@ import { isHttpError } from '@sveltejs/kit';
  */
 export function resetDb(): void {
 	db.exec('PRAGMA foreign_keys = OFF;');
+	db.exec('DELETE FROM issue_aliases;');
 	db.exec('DELETE FROM finding_triage;');
 	db.exec('DELETE FROM findings;');
 	db.exec('DELETE FROM reviews;');

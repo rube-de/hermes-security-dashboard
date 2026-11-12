@@ -36,6 +36,11 @@ export interface FindingLocation {
  *  (`fingerprint`) in one review, with the top-level fields taken from its most severe
  *  (then earliest-reported) location. */
 export interface Finding {
+ /** Canonical repo-scoped issue ID; fingerprint remains raw reported identity. */
+ issueId?: string;
+ submittedIssueId?: string;
+ continuityEvidence?: string;
+ noveltyReason?: string;
 	severity: Severity;
 	title: string;
 	file: string;

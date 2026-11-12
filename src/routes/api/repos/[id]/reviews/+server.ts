@@ -103,7 +103,10 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			code: typeof f.code === 'string' ? f.code : '',
 			recommendation: typeof f.recommendation === 'string' ? f.recommendation : '',
 			ruleId: ruleId.value,
-			locationKey: locationKey.value
+			locationKey: locationKey.value,
+   issueId: f.issueId as string | undefined,
+   continuityEvidence: f.continuityEvidence as string | undefined,
+   noveltyReason: f.noveltyReason as string | undefined
 		});
 	}
 

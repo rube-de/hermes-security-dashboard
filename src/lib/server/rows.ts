@@ -50,4 +50,7 @@ export interface FindingRow {
 	first_seen_at: number;
 	rule_id: string;
 	location_key: string;
+ submitted_issue_id: string;
+ continuity_evidence: string;
+ novelty_reason: string;
 }

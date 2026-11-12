@@ -1,3 +1,4 @@
+import { issueFirstSeenTimes, issueResolver } from './issue-continuity';
 import { db } from './db';
 import { VALID_SEV, type ReviewRow } from './rows';
 import { countSeverities, quiets, SEV_RANK } from '$lib/format';
@@ -56,7 +57,11 @@ export function unionFindingsForCommit(repoId: string, commit: string): UnionFin
 			  WHERE r.repo_id = ? AND r.commit_hash = ?`
 		)
 		.all(repoId, commit) as unknown as UnionFinding[];
-	return worstPerIssue(rows);
+	const resolve = issueResolver(repoId);
+	const earliest = issueFirstSeenTimes(repoId);
+	return worstPerIssue(rows.map((r) => ({ ...r, fingerprint: resolve(r.fingerprint) }))).map(
+		(r) => ({ ...r, firstSeenAt: earliest.get(r.fingerprint) ?? r.firstSeenAt })
+	);
 }
 
 /** Newest scan of a specific commit. Drives the repo's `lastRunAt` / `lastDurationSecs`
@@ -77,7 +82,10 @@ export function latestReviewRowForCommit(repoId: string, commit: string): Review
  * historic code) can't hijack the headline status to a stale code state. `exclude`
  * drops a commit, used to find the previous head as a first scan's diff base.
  */
-export function repoHead(repoId: string, exclude?: string): { commit: string; scans: number } | null {
+export function repoHead(
+	repoId: string,
+	exclude?: string
+): { commit: string; scans: number } | null {
 	const tail =
 		`${exclude ? 'AND commit_hash != ? ' : ''}` +
 		'GROUP BY commit_hash ORDER BY MIN(created_at) DESC, MIN(rowid) DESC LIMIT 1';
@@ -85,8 +93,7 @@ export function repoHead(repoId: string, exclude?: string): { commit: string; sc
 	const sql = `SELECT commit_hash, COUNT(*) AS scans FROM reviews WHERE repo_id = ? ${tail}`;
 	const stmt = db.prepare(sql);
 	const row = (exclude ? stmt.get(repoId, exclude) : stmt.get(repoId)) as
-		| { commit_hash: string; scans: number }
-		| undefined;
+		{ commit_hash: string; scans: number } | undefined;
 	return row ? { commit: row.commit_hash, scans: row.scans } : null;
 }
 
@@ -114,7 +121,9 @@ export function commitHistoryForRepo(repoId: string, reviewRows: ReviewRow[]): C
 		.all(repoId) as { review_id: string; fingerprint: string; severity: Severity }[];
 	const triage = triageMapForRepo(repoId);
 	const findingsByReview = new Map<string, typeof findingRows>();
-	for (const finding of findingRows) {
+	const resolve = issueResolver(repoId);
+	for (const rawFinding of findingRows) {
+		const finding = { ...rawFinding, fingerprint: resolve(rawFinding.fingerprint) };
 		if (quiets(triage.get(finding.fingerprint))) continue;
 		let findings = findingsByReview.get(finding.review_id);
 		if (!findings) {
@@ -171,8 +180,7 @@ export function commitHistoryForRepo(repoId: string, reviewRows: ReviewRow[]): C
 				createdAt: review.created_at,
 				counts: countSeverities(issues),
 				uniqueCount: issues.reduce(
-					(total, issue) =>
-						modelsByIssue.get(issue.fingerprint)?.size === 1 ? total + 1 : total,
+					(total, issue) => (modelsByIssue.get(issue.fingerprint)?.size === 1 ? total + 1 : total),
 					0
 				)
 			}))

@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { parse } from 'yaml';
 import specYaml from '$lib/server/openapi.yaml?raw';
+import { GET as getHealth } from '../../src/routes/api/health/+server';
+import {
+	GET as getAliases,
+	POST as postAlias
+} from '../../src/routes/api/repos/[id]/issue-aliases/+server';
+import { issueIdentity } from '$lib/server/fingerprint';
+import { vi } from 'vitest';
 import { GET as getOverview } from '../../src/routes/api/overview/+server';
 import { GET as getRepos } from '../../src/routes/api/repos/+server';
 import { GET as getRepo } from '../../src/routes/api/repos/[id]/+server';
@@ -87,11 +94,17 @@ function violations(value: unknown, schema: Schema, at = '$'): string[] {
 
 	const actual = jsonType(value);
 	const allowed = s.type === undefined ? null : [s.type].flat();
-	if (allowed && !allowed.includes(actual) && !(actual === 'integer' && allowed.includes('number'))) {
+	if (
+		allowed &&
+		!allowed.includes(actual) &&
+		!(actual === 'integer' && allowed.includes('number'))
+	) {
 		return [`${at}: ${actual} ${JSON.stringify(value)}, spec says ${allowed.join(' | ')}`];
 	}
-	if (s.const !== undefined && value !== s.const) return [`${at}: ${JSON.stringify(value)} is not the const`];
-	if (s.enum && !s.enum.includes(value)) return [`${at}: ${JSON.stringify(value)} is not in the enum`];
+	if (s.const !== undefined && value !== s.const)
+		return [`${at}: ${JSON.stringify(value)} is not the const`];
+	if (s.enum && !s.enum.includes(value))
+		return [`${at}: ${JSON.stringify(value)} is not in the enum`];
 
 	if (Array.isArray(value)) {
 		const items = s.items;
@@ -102,10 +115,14 @@ function violations(value: unknown, schema: Schema, at = '$'): string[] {
 	const obj = value as Record<string, unknown>;
 	const props = s.properties ?? {};
 	const out: string[] = [];
-	for (const k of Object.keys(obj)) if (!(k in props)) out.push(`${at}.${k}: returned but not in the spec`);
-	for (const k of Object.keys(props)) if (!(k in obj)) out.push(`${at}.${k}: in the spec but not returned`);
-	for (const k of s.required ?? []) if (!(k in props)) out.push(`${at}.${k}: required but not declared`);
-	for (const [k, v] of Object.entries(obj)) if (k in props) out.push(...violations(v, props[k], `${at}.${k}`));
+	for (const k of Object.keys(obj))
+		if (!(k in props)) out.push(`${at}.${k}: returned but not in the spec`);
+	for (const k of Object.keys(props))
+		if (!(k in obj)) out.push(`${at}.${k}: in the spec but not returned`);
+	for (const k of s.required ?? [])
+		if (!(k in props)) out.push(`${at}.${k}: required but not declared`);
+	for (const [k, v] of Object.entries(obj))
+		if (k in props) out.push(...violations(v, props[k], `${at}.${k}`));
 	return out;
 }
 
@@ -139,6 +156,48 @@ describe('OpenAPI spec matches read responses', () => {
 			findings: [{ severity: 'high', file: 'src/main.rs', title: 'Buffer overflow' }]
 		}).id;
 		setNextRun(T0 + 6 * HOUR);
+	});
+
+	it('GET /api/health exposes documented capability', async () => {
+		const result = await callApi(getHealth);
+		expect(violations(result.body, responseSchema('/api/health'))).toEqual([]);
+	});
+
+	it('GET /api/repos/{id}/issue-aliases and POST success match the documented audit schema', async () => {
+		vi.stubEnv('HERMES_API_TOKEN', 'test-only');
+		try {
+			const original = {
+				severity: 'high' as const,
+				title: 'Unchecked synthetic input',
+				file: 'src/handler.ts'
+			};
+			const renamed = { ...original, title: 'Missing synthetic guard' };
+			const review = insertReview(repoId, { commit: 'synthetic', findings: [original, renamed] });
+			const posted = await callApi(postAlias, {
+				method: 'POST',
+				headers: { authorization: 'Bearer test-only' },
+				params: { id: repoId },
+				body: {
+					fingerprint: issueIdentity(renamed),
+					issueId: issueIdentity(original),
+					reason: 'Reviewed same synthetic issue',
+					sourceReviewIds: [review.id]
+				}
+			});
+			expect(posted.status).toBe(201);
+			expect(
+				violations(
+					posted.body,
+					spec.paths['/api/repos/{id}/issue-aliases'].post.responses['201'].content![
+						'application/json'
+					].schema
+				)
+			).toEqual([]);
+			const read = await callApi(getAliases, { params: { id: repoId } });
+			expect(violations(read.body, responseSchema('/api/repos/{id}/issue-aliases'))).toEqual([]);
+		} finally {
+			vi.unstubAllEnvs();
+		}
 	});
 
 	it('GET /api/overview', async () => {
@@ -175,7 +234,13 @@ describe('OpenAPI spec matches read responses', () => {
 
 	it('GET /api/reviews/{id}, with a triaged finding and a resolved one', async () => {
 		const before = await callApi<ReviewDetail>(getReview, { params: { id: headReviewId } });
-		setTriage(repoId, before.body.findings[0].fingerprint, 'acknowledged', 'Tracked upstream', 'alice');
+		setTriage(
+			repoId,
+			before.body.findings[0].fingerprint,
+			'acknowledged',
+			'Tracked upstream',
+			'alice'
+		);
 
 		const res = await callApi<ReviewDetail>(getReview, { params: { id: headReviewId } });
 		expect(res.status).toBe(200);
@@ -188,7 +253,14 @@ describe('OpenAPI spec matches read responses', () => {
 		const idle = await callApi(getScan);
 		expect(violations(idle.body, responseSchema('/api/scan'))).toEqual([]);
 
-		setScan({ active: true, repoId, commit: 'c003', currentFile: 'src/main.rs', progress: 40, startedAt: T0 });
+		setScan({
+			active: true,
+			repoId,
+			commit: 'c003',
+			currentFile: 'src/main.rs',
+			progress: 40,
+			startedAt: T0
+		});
 		const active = await callApi(getScan);
 		expect(violations(active.body, responseSchema('/api/scan'))).toEqual([]);
 	});
