@@ -8,19 +8,21 @@ export function requireIssueId(value: unknown, name = 'issueId'): asserts value 
 	if (typeof value !== 'string' || !ISSUE_ID.test(value))
 		throw new Error(`${name} must be exactly 16 lowercase hex characters`);
 }
-export function requireReason(value: unknown, name: string): asserts value is string {
-	if (typeof value !== 'string' || !value.trim() || value.length > 4000)
-		throw new Error(`${name} must be a nonblank string of at most 4000 characters`);
+export function requireReason(value: unknown, name: string, max = 4000): asserts value is string {
+	if (typeof value !== 'string' || !value.trim() || value.length > max)
+		throw new Error(`${name} must be a nonblank string of at most ${max} characters`);
 }
 export function validateContinuity(f: FindingInput): void {
 	if (f.issueId !== undefined) requireIssueId(f.issueId);
+	if (f.issueId !== undefined && f.noveltyReason !== undefined)
+		throw new Error('issueId and noveltyReason are contradictory');
 	if (f.continuityEvidence !== undefined) {
-		requireReason(f.continuityEvidence, 'continuityEvidence');
+		requireReason(f.continuityEvidence, 'continuityEvidence', 2000);
 		if (f.issueId === undefined) throw new Error('continuityEvidence requires issueId');
 	}
-	if (f.noveltyReason !== undefined) requireReason(f.noveltyReason, 'noveltyReason');
+	if (f.noveltyReason !== undefined) requireReason(f.noveltyReason, 'noveltyReason', 2000);
 	if (f.issueId !== undefined && f.issueId !== issueIdentity(f))
-		requireReason(f.continuityEvidence, 'continuityEvidence');
+		requireReason(f.continuityEvidence, 'continuityEvidence', 2000);
 }
 
 /** Do not let occurrence deduplication silently discard a submitted continuity claim. */

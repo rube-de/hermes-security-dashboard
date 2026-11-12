@@ -658,6 +658,10 @@ components:
       pattern: '\S'
       description: Nonblank text; null, wrong types and whitespace-only values are rejected.
 
+    FindingContinuityText:
+      allOf: [{ $ref: '#/components/schemas/ContinuityText' }]
+      maxLength: 2000
+
     SourceReviewIds:
       type: array
       minItems: 1
@@ -915,8 +919,15 @@ components:
 
     FindingInput:
       type: object
+      not: { required: [issueId, noveltyReason] }
+      dependentRequired:
+        continuityEvidence: [issueId]
       description: |
-        Legacy payloads without continuity fields remain valid. If issueId differs
+        Legacy payloads without continuity fields remain valid. issueId and
+        noveltyReason are mutually exclusive; finding continuity text is bounded
+        to 2000 characters. Already-known raw fingerprints cannot be reassigned
+        to a different component through this endpoint: use the explicit alias API.
+        Membership claims in an already-linked component remain valid. If issueId differs
         from the computed raw fingerprint, continuityEvidence is required; this
         semantic comparison is enforced by the server. Null, wrong types and blank
         continuity fields are rejected, not treated as omission.
@@ -926,10 +937,10 @@ components:
           allOf: [{ $ref: '#/components/schemas/IssueIdentity' }]
           description: Existing repository-local canonical root only; not a fingerprint that is itself aliased, or a cross-repository identity.
         continuityEvidence:
-          allOf: [{ $ref: '#/components/schemas/ContinuityText' }]
+          allOf: [{ $ref: '#/components/schemas/FindingContinuityText' }]
           description: Required when issueId differs from the computed raw fingerprint; creates an audited review-submission alias.
         noveltyReason:
-          allOf: [{ $ref: '#/components/schemas/ContinuityText' }]
+          allOf: [{ $ref: '#/components/schemas/FindingContinuityText' }]
           description: Optional explanation of why this reported finding is distinct.
         severity: { $ref: '#/components/schemas/Severity' }
         title: { type: string }
@@ -980,11 +991,11 @@ components:
           description: Current resolved repo-scoped canonical root; equals raw fingerprint without an alias.
         continuityEvidence:
           type: string
-          maxLength: 4000
+          maxLength: 2000
           description: Persisted submission evidence; may be empty when not supplied.
         noveltyReason:
           type: string
-          maxLength: 4000
+          maxLength: 2000
           description: Persisted novelty explanation; may be empty when not supplied.
         submittedIssueId:
           type: string

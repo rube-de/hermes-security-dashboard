@@ -431,11 +431,15 @@ Review finding inputs optionally accept:
 | Field | Contract |
 | --- | --- |
 | `issueId` | Exactly 16 lowercase hexadecimal characters (`^[0-9a-f]{16}$`), naming an existing canonical root in this repository, not an alias or another repository's issue. |
-| `continuityEvidence` | Nonblank string, 1..4000 characters; required when `issueId` differs from the computed raw fingerprint. |
-| `noveltyReason` | Optional nonblank string, 1..4000 characters explaining why a finding is distinct. |
+| `continuityEvidence` | Nonblank string, 1..2000 characters; required when `issueId` differs from the computed raw fingerprint. |
+| `noveltyReason` | Optional nonblank string, 1..2000 characters explaining why a finding is distinct. |
 
 For these fields, null, wrong types and blank values are rejected, not treated as
-omission. `continuityEvidence` without `issueId` is rejected. Payloads omitting
+omission. `issueId` together with `noveltyReason` is contradictory and rejected.
+`continuityEvidence` without `issueId` is rejected. A new raw fingerprint can link
+an existing root using evidence. A previously stored raw fingerprint cannot be
+reassigned to another canonical component by submitting a review: use the separately
+reviewed alias API first. Membership claims in an already-linked component remain valid. Payloads omitting
 them remain valid. Duplicate-place findings with any continuity metadata must carry
 identical complete accepted evidence; conflicting claims are rejected before alias
 creation or content deduplication, rather than dropping a claim. Ingest evidence creates an audited

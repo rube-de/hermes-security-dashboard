@@ -90,6 +90,16 @@ function insertReviewInTransaction(
 	const findings = canonicalFindings(input.findings ?? []);
 	for (const f of input.findings ?? []) {
 		if (f.issueId) {
+			const raw = issueIdentity(f);
+			if (
+				resolveIssueId(repoId, raw) !== f.issueId &&
+				db
+					.prepare('SELECT 1 FROM findings WHERE repo_id = ? AND fingerprint = ? LIMIT 1')
+					.get(repoId, raw)
+			)
+				throw new Error(
+					'conflicting known raw fingerprint reassignment requires the explicit reviewed alias endpoint'
+				);
 			const prior = db
 				.prepare(
 					'SELECT review_id FROM findings WHERE repo_id = ? AND fingerprint = ? ORDER BY id LIMIT 1'

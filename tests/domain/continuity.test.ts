@@ -4,12 +4,31 @@ import { addRepo, getRepoDetail } from '$lib/server/repos';
 import { insertReview } from '$lib/server/ingest';
 import { getReviewDetail } from '$lib/server/reviews';
 import { issueIdentity } from '$lib/server/fingerprint';
+import { associateIssue } from '$lib/server/issue-continuity';
 import { setTriage } from '$lib/server/triage';
 import { resetDb, callApi } from '../test-utils';
 import { PUT as triagePut } from '../../src/routes/api/repos/[id]/findings/[fingerprint]/triage/+server';
 
 const original = { severity: 'high' as const, title: 'Unsafe callback', file: 'a.ts', line: 4 };
 const root = issueIdentity(original);
+// Historical associations use the separately reviewed alias operation, not ingest.
+function reviewedAlias(fp: string, target = root): void {
+	const sourceReviewIds = (
+		db
+			.prepare(
+				'SELECT DISTINCT review_id FROM findings WHERE repo_id = ? AND fingerprint IN (?, ?)'
+			)
+			.all('r', fp, target) as { review_id: string }[]
+	).map((r) => r.review_id);
+	associateIssue(
+		'r',
+		fp,
+		target,
+		'Explicitly reviewed synthetic association',
+		{ actor: 'api-token', sourceReviewIds },
+		'exact-edge'
+	);
+}
 beforeEach(() => {
 	resetDb();
 	addRepo({ id: 'r', lang: 'TS' });
@@ -74,6 +93,7 @@ it('derives canonical oldest-open time from unchanged historical raw discovery r
 	const before = db
 		.prepare('SELECT first_seen_at FROM findings WHERE review_id = ?')
 		.get(recent.id);
+	reviewedAlias(issueIdentity(alternate));
 	insertReview('r', {
 		commit: 'older-rescan',
 		findings: [{ ...alternate, issueId: root, continuityEvidence: 'Same issue reviewed later' }],
@@ -92,6 +112,7 @@ it('applies canonical human quieting to a raw historical resolved snapshot', () 
 	const snapshot = db
 		.prepare('SELECT resolved_json, resolved_count FROM reviews WHERE id = ?')
 		.get(empty.id);
+	reviewedAlias(issueIdentity(alias));
 	insertReview('r', {
 		commit: 'c',
 		findings: [{ ...alias, issueId: root, continuityEvidence: 'Reviewed same underlying issue' }],
@@ -143,6 +164,7 @@ it('inherits an alias-only oldest tag and permits later explicit human updates t
 	insertReview('r', { commit: 'a', findings: [original, b] });
 	setTriage('r', bId, 'acknowledged', 'Original review', 'human-a', 100);
 	const tags = db.prepare('SELECT * FROM finding_triage').all();
+	reviewedAlias(bId);
 	const latest = insertReview('r', {
 		commit: 'b',
 		findings: [{ ...b, issueId: root, continuityEvidence: 'Same underlying request path' }]
@@ -185,6 +207,7 @@ it('inherits an alias-only oldest tag and permits later explicit human updates t
 it('fails closed on unexpected post-merge conflicting tags but allows an explicit human reconciliation', async () => {
 	const alias = { ...original, title: 'Alternate tag-bearing report' };
 	insertReview('r', { commit: 'a', findings: [original, alias] });
+	reviewedAlias(issueIdentity(alias));
 	const linked = insertReview('r', {
 		commit: 'b',
 		findings: [{ ...alias, issueId: root, continuityEvidence: 'Same request sink' }]
@@ -214,12 +237,7 @@ it('rejects associations with conflicting human verdicts without mutating any tr
 	setTriage('r', root, 'acknowledged', 'Investigating', 'human-a', 100);
 	setTriage('r', issueIdentity(b), 'false_positive', 'Guarded', 'human-b', 200);
 	const tags = db.prepare('SELECT * FROM finding_triage').all();
-	expect(() =>
-		insertReview('r', {
-			commit: 'b',
-			findings: [{ ...b, issueId: root, continuityEvidence: 'Proposed same sink' }]
-		})
-	).toThrow(/triage.*conflict|conflicting.*triage/);
+	expect(() => reviewedAlias(issueIdentity(b))).toThrow(/triage.*conflict|conflicting.*triage/);
 	expect(db.prepare('SELECT * FROM finding_triage').all()).toEqual(tags);
 	expect(db.prepare('SELECT * FROM issue_aliases').all()).toEqual([]);
 });
@@ -228,6 +246,7 @@ it('rejects reverse or noncanonical associations before duplicate short circuit'
 	const b = { ...original, title: 'Second issue' };
 	const bId = issueIdentity(b);
 	insertReview('r', { commit: 'a', findings: [original, b] });
+	reviewedAlias(bId);
 	insertReview('r', {
 		commit: 'b',
 		findings: [{ ...b, issueId: root, continuityEvidence: 'Reviewed same sink' }]

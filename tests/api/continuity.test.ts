@@ -21,6 +21,55 @@ const post = (commit: string, findings: unknown[]) =>
 		params: { id: 'r' },
 		body: { commit, findings }
 	});
+it('bounds continuity and novelty text at the producer contract limit of 2000 characters', async () => {
+	await post('root', [base]);
+	for (const field of ['continuityEvidence', 'noveltyReason']) {
+		const finding = {
+			...base,
+			title: 'Bounded ' + field,
+			...(field === 'continuityEvidence' ? { issueId: root } : {})
+		};
+		expect((await post(field + '-max', [{ ...finding, [field]: 'x'.repeat(2000) }])).status).toBe(
+			201
+		);
+		const before = db.prepare('SELECT * FROM reviews').all();
+		expect((await post(field + '-over', [{ ...finding, [field]: 'x'.repeat(2001) }])).status).toBe(
+			400
+		);
+		expect(db.prepare('SELECT * FROM reviews').all()).toEqual(before);
+	}
+});
+
+it('requires the separately reviewed alias API to associate an already-known raw fingerprint', async () => {
+	await post('root', [base]);
+	const other = { ...base, title: 'Previously independent raw finding' };
+	await post('old', [other]);
+	const before = db.prepare('SELECT * FROM findings').all();
+	const reviews = db.prepare('SELECT * FROM reviews').all();
+	for (const commit of ['old', 'new']) {
+		const result = await post(commit, [
+			{ ...other, issueId: root, continuityEvidence: 'Inline reassignment is insufficient' }
+		]);
+		expect(result.status).toBe(400);
+		expect(result.body.error).toMatch(/known.*fingerprint|explicit.*alias/);
+		expect(db.prepare('SELECT * FROM findings').all()).toEqual(before);
+		expect(db.prepare('SELECT * FROM reviews').all()).toEqual(reviews);
+		expect(db.prepare('SELECT * FROM issue_aliases').all()).toEqual([]);
+	}
+});
+
+it('rejects contradictory known-issue and genuinely-new claims before writing', async () => {
+	await post('a', [base]);
+	const before = db.prepare('SELECT * FROM reviews').all();
+	const result = await post('a', [
+		{ ...base, issueId: root, noveltyReason: 'Claims this is a distinct issue' }
+	]);
+	expect(result.status).toBe(400);
+	expect(result.body.error).toMatch(/contradict|noveltyReason/);
+	expect(db.prepare('SELECT * FROM reviews').all()).toEqual(before);
+	expect(db.prepare('SELECT * FROM issue_aliases').all()).toEqual([]);
+});
+
 it('rejects a duplicate-place claim that occurrence dedup would discard, including on legacy retries', async () => {
 	await post('root', [base]);
 	const other = { ...base, title: 'Different source wording' };
