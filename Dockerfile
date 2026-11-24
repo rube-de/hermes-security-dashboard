@@ -2,7 +2,7 @@
 
 # Base images are pinned by digest; Dependabot (.github/dependabot.yml) opens a
 # PR whenever a tag moves, e.g. for a Node security release.
-FROM oven/bun:1@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS bun
+FROM oven/bun:1@sha256:3aa040e5445efa09d75bb428a64ba50db13e2b3ac9b6b0c7f145615f62b2ee18 AS bun
 
 # ---- builder: install all deps and build the adapter-node server ----
 # Node base (not the bun image) so the build runs under Node: db.ts imports the
