@@ -2,13 +2,13 @@
 
 # Base images are pinned by digest; Dependabot (.github/dependabot.yml) opens a
 # PR whenever a tag moves, e.g. for a Node security release.
-FROM oven/bun:1@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS bun
+FROM oven/bun:1@sha256:3aa040e5445efa09d75bb428a64ba50db13e2b3ac9b6b0c7f145615f62b2ee18 AS bun
 
 # ---- builder: install all deps and build the adapter-node server ----
 # Node base (not the bun image) so the build runs under Node: db.ts imports the
 # built-in node:sqlite, which Bun's runtime has no equivalent for and would fail
 # to resolve during `vite build`. Bun is still used as the fast package manager.
-FROM node:26-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS builder
+FROM node:26-bookworm-slim@sha256:0042e17d232a87a2cd485be1da7900fca4d10a4ad11b29e9285da1d2e54798c9 AS builder
 WORKDIR /app
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 
@@ -34,7 +34,7 @@ RUN bun install --production --frozen-lockfile
 # ---- runtime: Node with built-in node:sqlite, non-root, on the shared volume ----
 # node:sqlite is stable and unflagged on Node 24+; pinned to 26 (matches dev),
 # so the start command needs no --experimental-sqlite flag.
-FROM node:26-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS runtime
+FROM node:26-bookworm-slim@sha256:0042e17d232a87a2cd485be1da7900fca4d10a4ad11b29e9285da1d2e54798c9 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
